@@ -1,3 +1,88 @@
-# IDEs
-.vscode
-*.code-workspace
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.env/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ML/AI specific
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+*.ckpt
+output/
+outputs/
+results/
+runs/
+logs/
+checkpoints/
+# IDE/Editor specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ComfyUI specific
+temp/
+cache/
+input/
+output/
+
+# Media files that might be large
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.mp4
+*.avi
+*.mov
+!examples/*.jpg
+!examples/*.png
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
