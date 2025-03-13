@@ -1,3 +1,10 @@
+"""Source code for the Feature Bank of the StreamV2V paper.
+
+References:
+    StreamV2V: A Deep Generative Model for High-fidelity View Synthesis - Liang et al.,
+    2025, URL: https://arxiv.org/abs/2405.15757
+"""
+
 from typing import Optional, Deque, List, Tuple, Dict, Any
 from collections import deque
 

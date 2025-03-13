@@ -1,4 +1,4 @@
-"""ComfyUI Stream Pack Nodes"""
+"""ComfyUI Stream Pack Nodes."""
 
 from .node_wrappers import feature_bank
 
@@ -13,6 +13,6 @@ for module in [feature_bank]:
     if hasattr(module, "NODE_DISPLAY_NAME_MAPPINGS"):
         NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
 
-NODE_DISPLAY_NAME_MAPPINGS["ComfyUIStreamPack"] = "ComfyUI Stream Pack Nodes"
+NODE_DISPLAY_NAME_MAPPINGS["StreamPack"] = "Stream Pack Nodes"
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+__all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']

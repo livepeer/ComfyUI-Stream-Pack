@@ -8,7 +8,6 @@ References:
 
 from ..src.feature_bank.feature_bank import (
     FeatureBankAttentionProcessorNode,
-    FeatureBankAttentionProcessor,
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -16,7 +15,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FeatureBankAttentionProcessor": FeatureBankAttentionProcessor
+    "FeatureBankAttentionProcessor": "Feature Bank Attention Processor"
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
