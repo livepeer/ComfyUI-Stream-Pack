@@ -2,12 +2,13 @@
 
 from .node_wrappers import feature_bank
 from .node_wrappers import facemesh
+from .node_wrappers import utils
 # Collect all NODE_CLASS_MAPPINGS and NODE_DISPLAY_NAME_MAPPINGS from submodules.
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
 # Import and update mappings from submodules.
-for module in [feature_bank, facemesh]:
+for module in [feature_bank, facemesh, utils]:
     if hasattr(module, "NODE_CLASS_MAPPINGS"):
         NODE_CLASS_MAPPINGS.update(module.NODE_CLASS_MAPPINGS)
     if hasattr(module, "NODE_DISPLAY_NAME_MAPPINGS"):
