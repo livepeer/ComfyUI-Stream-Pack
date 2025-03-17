@@ -14,7 +14,7 @@ from torch import nn
 from diffusers.utils import USE_PEFT_BACKEND
 
 
-def get_nn_feats(
+def extract_nn_features(
     x: torch.Tensor, y: torch.Tensor, threshold: float = 0.9
 ) -> torch.Tensor:
     """
@@ -182,7 +182,6 @@ class FeatureBankAttentionProcessor:
         """
         Forward pass of feature bank attention with feature injection.
         """
-        residual = hidden_states
         args = () if USE_PEFT_BACKEND else (scale,)
         input_ndim = hidden_states.ndim
 
@@ -192,7 +191,7 @@ class FeatureBankAttentionProcessor:
                 batch_size, channel, height * width
             ).transpose(1, 2)
 
-        batch_size, key_tokens, _ = (
+        batch_size, _ , _ = (
             hidden_states.shape
             if encoder_hidden_states is None
             else encoder_hidden_states.shape
@@ -391,14 +390,14 @@ class FeatureBankAttentionProcessor:
                     "Output",
                 )
 
-                self._debug_print("\n--- DEBUG: Before get_nn_feats ---")
+                self._debug_print("\n--- DEBUG: Before extract_nn_features ---")
                 self._debug_print("Shape of hidden_states:", hidden_states.shape)
                 self._debug_print(
                     "Shape of cached_output_tensor_from_list:",
                     cached_output_tensor_from_list.shape,
                 )
 
-                nn_hidden_states = get_nn_feats(
+                nn_hidden_states = extract_nn_features(
                     hidden_states,
                     cached_output_tensor_from_list,
                     threshold=self.threshold,
