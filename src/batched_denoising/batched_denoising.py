@@ -89,7 +89,7 @@ class StreamBatchSampler(ControlNodeBase):
         "LATENT",
     )
     FUNCTION = "update"
-    CATEGORY = "real-time/sampling"
+    CATEGORY = "StreamPack/sampling"
     DESCRIPTION = "Implements batched denoising for faster inference by processing multiple frames in parallel at different denoising steps (StreamDiffusion)"
 
     def __init__(self):
