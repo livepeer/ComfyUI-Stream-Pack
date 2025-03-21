@@ -1,5 +1,5 @@
 import torch
-from .base.control_base import ControlNodeBase
+from control_base import ControlNodeBase
 import comfy.model_management
 import comfy.samplers
 import math
