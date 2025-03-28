@@ -225,7 +225,7 @@ class FaceMeshDrawNode:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "draw_facemesh"
-    CATEGORY = "ComfyUI_FaceMesh"
+    CATEGORY = "StreamPack/preprocessors/controlnet"
 
     def draw_facemesh(
         self, image, facemesh_data, draw_contours, mesh_thickness, mesh_color
@@ -548,7 +548,7 @@ class FaceMeshMaskNode:
     RETURN_TYPES = ("MASK",)
     RETURN_NAMES = ("mask",)
     FUNCTION = "create_mask"
-    CATEGORY = "ComfyUI_FaceMesh"
+    CATEGORY = "StreamPack/preprocessors/controlnet"
 
     def create_mask(
         self,
@@ -782,7 +782,7 @@ class FaceMeshNode:
     RETURN_TYPES = ("FACEMESH_DATA", "IMAGE")
     RETURN_NAMES = ("facemesh_data", "annotations")
     FUNCTION = "detect_facemesh"
-    CATEGORY = "ComfyUI_FaceMesh"
+    CATEGORY = "StreamPack/preprocessors/controlnet"
 
     def detect_facemesh(
         self,
