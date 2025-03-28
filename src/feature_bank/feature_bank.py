@@ -191,7 +191,7 @@ class FeatureBankAttentionProcessor:
                 batch_size, channel, height * width
             ).transpose(1, 2)
 
-        batch_size, _ , _ = (
+        batch_size, _, _ = (
             hidden_states.shape
             if encoder_hidden_states is None
             else encoder_hidden_states.shape
@@ -459,7 +459,7 @@ class FeatureBankAttentionProcessorNode:
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "update_node"
-    CATEGORY = "feature-bank"
+    CATEGORY = "StreamPack/video"
 
     def update_node(
         self,
