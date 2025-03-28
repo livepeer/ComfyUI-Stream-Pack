@@ -13,7 +13,6 @@ from ..src.feature_bank.feature_bank import (
 NODE_CLASS_MAPPINGS = {
     "FeatureBankAttentionProcessor": FeatureBankAttentionProcessorNode
 }
-
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FeatureBankAttentionProcessor": "Feature Bank Attention Processor"
 }
