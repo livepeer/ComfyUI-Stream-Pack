@@ -1,4 +1,5 @@
-"""Source code for facial landmark detection and utilities using MediaPipe FaceMesh. Inspired by the ComfyUI ControlNet Auxiliary MediaPipe Face node.
+"""Source code for facial landmark detection and utilities using MediaPipe FaceMesh. 
+Inspired by the ComfyUI ControlNet Auxiliary MediaPipe Face node.
 
 References:
     ComfyUI ControlNet Auxiliary MediaPipe Face node - https://github.com/Fannovel16/comfyui_controlnet_aux
