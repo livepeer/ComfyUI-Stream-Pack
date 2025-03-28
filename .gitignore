@@ -1,0 +1,7 @@
+# Misc
+__pycache__
+*.pyc
+
+# IDEs
+.vscode
+*.code-workspace
