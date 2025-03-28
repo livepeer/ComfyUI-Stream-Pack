@@ -1,1 +1,1 @@
-# Dummy file ensuring this package will be recognized.
+# Dummy file ensuring this sub-package will be recognized.
