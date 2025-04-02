@@ -5,12 +5,3 @@ __pycache__
 # IDEs
 .vscode
 *.code-workspace
-
-# Model weights
-*.pb
-*.pth
-*.safetensors
-*.pt
-*.pth.tar
-*.pth.tar.gz
-*.pth.tar.xz
