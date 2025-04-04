@@ -13,10 +13,10 @@ def check_opencv_cuda():
             logger.info("OpenCV CUDA is installed and working")
             return True
         else:
-            logger.warning("ComfyUI-Stream-Pack: OpenCV CUDA is not available or not working. Super Resolution node may not work")
+            logger.warning("OpenCV CUDA is not available or not working. Super Resolution node may not work")
             return False
     except ImportError:
-        logger.warning("ComfyUI-Stream-Pack: OpenCV is not installed")
+        logger.warning("OpenCV is not installed")
         return False
 
 check_opencv_cuda()
