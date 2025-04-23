@@ -1,0 +1,50 @@
+{
+  "1": {
+    "inputs": {
+      "model_type": "FSRCNN",
+      "scale_factor": "2"
+    },
+    "class_type": "SuperResolutionModelLoader",
+    "_meta": {
+      "title": "SR Model Loader"
+    }
+  },
+  "2": {
+    "inputs": {
+      "use_cuda": "True",
+      "image": [
+        "3",
+        0
+      ],
+      "sr_model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SuperResolutionUpscale",
+    "_meta": {
+      "title": "SR Upscale"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": "example-512x512.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  }
+}
