@@ -301,23 +301,6 @@ class StreamBatchSampler(ControlNodeBase):
 
         return model
 
-    def apply_similarity_filter(self, x_0_pred_out):
-        """Apply similarity filter to skip similar frames if enabled"""
-        if not self.similarity_threshold > 0:
-            return x_0_pred_out
-
-        if self.similarity_filter is None:
-            from .controls.similar_image_filter import SimilarImageFilter
-
-            self.similarity_filter = SimilarImageFilter(
-                threshold=self.similarity_threshold, max_skip_frame=self.max_skip_frames
-            )
-        filtered_out = self.similarity_filter(x_0_pred_out)
-        if filtered_out is not None:
-            return filtered_out
-
-        return x_0_pred_out
-
     def compute_alpha_beta(self, sigmas):
         """Pre-compute alpha and beta terms for the given sigmas (LCM-like using cosine schedule)"""
         self.cached_sigmas = sigmas.clone()
@@ -510,9 +493,6 @@ class StreamBatchSampler(ControlNodeBase):
             print(
                 f"  Output pred stats: min={x_0_pred_out.min():.4f}, max={x_0_pred_out.max():.4f}, mean={x_0_pred_out.mean():.4f}"
             )
-
-            # Apply similarity filter if enabled
-            x_0_pred_out = self.apply_similarity_filter(x_0_pred_out)
 
             # Call callback if provided
             if callback is not None:
