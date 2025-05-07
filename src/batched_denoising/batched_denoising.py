@@ -777,3 +777,86 @@ class StreamScheduler(ControlNodeBase):
             selected_sigmas, dtype=torch.float32, device=device
         )
         return (selected_sigmas,)
+
+
+class StreamFrameBuffer:
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "buffer_size": ("INT", {
+                    "default": 4,
+                    "min": 1,
+                    "max": 10,
+                    "step": 1,
+                    "tooltip": "Number of frames to buffer before starting batch processing. Should match number of denoising steps."
+                }),
+            },
+        }
+    
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "update"
+    CATEGORY = "StreamPack/sampling"
+    DESCRIPTION = "Accumulates frames to enable staggered batch denoising like StreamDiffusion. Use in conjunction with StreamBatchSampler"
+    
+    
+    def __init__(self):
+        self.frame_buffer = None  # Tensor of shape [buffer_size, C, H, W]
+        self.buffer_size = None
+        self.buffer_pos = 0  # Current position
+        self.is_initialized = False  # Track buffer initialization
+        self.is_txt2img_mode = False
+    
+    def update(self, latent, buffer_size=4):
+        """Add new frame to buffer and return batch when ready"""
+        self.buffer_size = buffer_size
+        
+        # Extract latent tensor from input and remove batch dimension if present
+        x = latent["samples"]
+        
+        # Check if this is a txt2img (zeros tensor) or img2img mode
+        # In ComfyUI, EmptyLatentImage returns a zeros tensor with shape [batch_size, 4, h//8, w//8]
+        # We consider it txt2img mode if the tensor contains all zeros
+        is_txt2img_mode = torch.sum(torch.abs(x)) < 1e-6
+        self.is_txt2img_mode = is_txt2img_mode
+        
+        # If it's a batch with size 1, remove the batch dimension for our buffer
+        if x.dim() == 4 and x.shape[0] == 1:  # [1,C,H,W]
+            x = x.squeeze(0)  # Remove batch dimension -> [C,H,W]
+        
+        # Initialize or resize frame_buffer as a tensor
+        if not self.is_initialized or self.frame_buffer.shape[0] != self.buffer_size or \
+           self.frame_buffer.shape[1:] != x.shape:
+            # Pre-allocate buffer with correct shape
+            self.frame_buffer = torch.zeros(
+                (self.buffer_size, *x.shape),
+                device=x.device,
+                dtype=x.dtype
+            )
+            if self.is_txt2img_mode or not self.is_initialized:
+                # Optimization: Use broadcasting to fill buffer with copies
+                self.frame_buffer[:] = x.unsqueeze(0)  # Broadcast x to [buffer_size, C, H, W]
+
+            self.is_initialized = True
+            self.buffer_pos = 0
+        else:
+            # Add new frame to buffer using ring buffer logic
+            self.frame_buffer[self.buffer_pos] = x  # In-place update
+            self.buffer_pos = (self.buffer_pos + 1) % self.buffer_size  # Circular increment
+        
+        # Optimization: frame_buffer is already a tensor batch, no need to stack
+        batch = self.frame_buffer
+
+        
+        # Return as latent dict with preserved dimensions
+        result = {"samples": batch}
+        
+        # Preserve height and width if present in input
+        if "height" in latent:
+            result["height"] = latent["height"]
+        if "width" in latent:
+            result["width"] = latent["width"]
+            
+        return (result,)
