@@ -37,6 +37,7 @@ class AudioTranscriptionNode:
     
     CATEGORY = "audio_utils"
     RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("transcription",)
     
     def __init__(self):
         # Audio buffering
