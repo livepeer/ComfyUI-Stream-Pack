@@ -5,7 +5,6 @@ This node buffers audio segments and performs transcription using faster-whisper
 with controlled output timing to prevent message flooding.
 """
 
-import asyncio
 import json
 import logging
 import time
@@ -15,12 +14,8 @@ import numpy as np
 from typing import Optional, List, Deque, Dict, Any
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 import threading
-from queue import Queue, Empty
 from faster_whisper import WhisperModel
-
-# from comfystream import tensor_cache  # Optional dependency
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +34,6 @@ class AudioTranscriptionNode:
     Real-time audio transcription node that buffers audio and outputs 
     transcribed text on a controlled schedule to prevent message flooding.
     """
-    
-    CATEGORY = "audio_utils"
-    RETURN_TYPES = ("STRING",)
     
     def __init__(self):
         # Audio buffering
@@ -107,13 +99,11 @@ class AudioTranscriptionNode:
             }
         }
     
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("transcription-text",)
     FUNCTION = "execute"
-
-    @classmethod
-    def IS_CHANGED(cls):
-        return float("nan")
-    
-
+    OUTPUT_NODE = True
+    CATEGORY = "StreamPack/AudioTranscription"
 
     def _initialize_whisper_model(self, model_size: str):
         """Initialize the Whisper model if not already loaded."""
@@ -541,9 +531,6 @@ class SRTGeneratorNode:
     Compatible with AudioTranscriptionNode output when word timestamps are enabled.
     """
     
-    CATEGORY = "text_utils"
-    RETURN_TYPES = ("STRING",)
-    
     def __init__(self):
         self.subtitle_counter = 1
         
@@ -582,15 +569,11 @@ class SRTGeneratorNode:
             }
         }
     
-    @classmethod
-    def RETURN_NAMES(cls):
-        return ("srt_content",)
-    
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("srt-content",)
     FUNCTION = "generate_srt"
-    
-    @classmethod
-    def IS_CHANGED(cls):
-        return float("nan")
+    OUTPUT_NODE = True
+    CATEGORY = "StreamPack/SRTGeneration"    
     
     def generate_srt(self, 
                     transcription_data: str,
