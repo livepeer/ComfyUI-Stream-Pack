@@ -6,18 +6,16 @@ with controlled output timing to prevent message flooding.
 """
 
 # Import node classes
-from ..src.audio_transcription.transcription_nodes import AudioTranscriptionNode, SRTGeneratorNode
+from ..src.audio_transcription.transcription_nodes import AudioTranscriptionNode
+from ..src.audio_transcription.srt_generator_node import SRTGeneratorNode
 
-# Define NODE_CLASS_MAPPINGS for ComfyUI
+# Register the node
 NODE_CLASS_MAPPINGS = {
-    "AudioTranscriptionNode": AudioTranscriptionNode,
-    "SRTGeneratorNode": SRTGeneratorNode,
+    "AudioTranscriptionNode": AudioTranscriptionNode, "SRTGeneratorNode": SRTGeneratorNode
 }
 
-# Define NODE_DISPLAY_NAME_MAPPINGS for ComfyUI
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "AudioTranscriptionNode": "Audio Transcription (Real-time)",
-    "SRTGeneratorNode": "SRT Subtitle Generator",
+    "AudioTranscriptionNode": "Audio Transcription (Real-time)", "SRTGeneratorNode": "SRT Generator"
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
