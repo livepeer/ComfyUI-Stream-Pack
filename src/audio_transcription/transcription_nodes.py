@@ -5,17 +5,22 @@ This node buffers audio segments and performs transcription using faster-whisper
 with controlled output timing to prevent message flooding.
 """
 
+import asyncio
 import json
 import logging
 import time
 import tempfile
 import os
 import numpy as np
-from typing import Optional, Deque
+from typing import Optional, List, Deque, Dict, Any
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 import threading
+from queue import Queue, Empty
 from faster_whisper import WhisperModel
+
+# from comfystream import tensor_cache  # Optional dependency
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +47,13 @@ class AudioTranscriptionNode:
         # Audio buffering
         self.audio_buffer = np.empty(0, dtype=np.int16)
         self.buffer_duration = 0.0  # Duration in seconds
-        self.sample_rate = None
-        self.buffer_samples = None
+        self.sample_rate: Optional[int] = None
+        self.buffer_samples: Optional[int] = None
         
         # Whisper model (shared across instances)
         self._whisper_model = None
         self._model_lock = threading.Lock()
+        self._model_size_name = ""  # Track model size separately
         
         # Transcription queue for controlled output
         self.transcription_queue: Deque[str] = deque(maxlen=50)
@@ -101,10 +107,6 @@ class AudioTranscriptionNode:
             }
         }
     
-    @classmethod
-    def RETURN_NAMES(cls) -> tuple[str, ...]:
-        return ("transcription",)
-
     FUNCTION = "execute"
 
     @classmethod
@@ -118,7 +120,7 @@ class AudioTranscriptionNode:
         with self._model_lock:
             # Load model if not already loaded or if different size requested
             if (self._whisper_model is None or 
-                getattr(self._whisper_model, 'model_size_name', '') != model_size):
+                self._model_size_name != model_size):
                 
                 logger.info(f"Loading Whisper model: {model_size}")
                 self._load_whisper_model_now(model_size)
@@ -149,7 +151,7 @@ class AudioTranscriptionNode:
             device=device, 
             compute_type=compute_type
         )
-        self._whisper_model.model_size_name = model_size
+        self._model_size_name = model_size
         logger.info(f"Whisper model '{model_size}' loaded successfully on {device}")
 
     def _ensure_model_loaded(self, model_size: str):
@@ -157,7 +159,7 @@ class AudioTranscriptionNode:
         with self._model_lock:
             # Check if we need to load or switch models
             if (self._whisper_model is None or 
-                getattr(self._whisper_model, 'model_size_name', '') != model_size):
+                self._model_size_name != model_size):
                 
                 logger.info(f"Loading Whisper model: {model_size}")
                 self._load_whisper_model_now(model_size)
@@ -190,15 +192,19 @@ class AudioTranscriptionNode:
             self.audio_buffer = np.concatenate([self.audio_buffer, audio_input])
         
         # Update buffer duration
-        self.buffer_duration = len(self.audio_buffer) / self.sample_rate
+        if self.sample_rate is not None:
+            self.buffer_duration = len(self.audio_buffer) / self.sample_rate
         
         # Check if we have enough audio for transcription
-        ready = len(self.audio_buffer) >= self.buffer_samples
+        if self.buffer_samples is not None:
+            ready = len(self.audio_buffer) >= self.buffer_samples
+            
+            if ready:
+                logger.debug(f"Audio buffer ready for transcription: {self.buffer_duration:.2f}s ({len(self.audio_buffer)} samples)")
+            
+            return ready
         
-        if ready:
-            logger.debug(f"Audio buffer ready for transcription: {self.buffer_duration:.2f}s ({len(self.audio_buffer)} samples)")
-        
-        return ready
+        return False
     
     def _normalize_audio_for_whisper(self, audio_input: np.ndarray) -> np.ndarray:
         """
@@ -238,12 +244,16 @@ class AudioTranscriptionNode:
     
     def _transcribe_audio_buffer(self, model_size: str, language: str, enable_vad: bool, output_format: str = "json_segments") -> Optional[str]:
         """Transcribe the current audio buffer and return combined text."""
-        if len(self.audio_buffer) < self.buffer_samples:
+        if self.buffer_samples is None or len(self.audio_buffer) < self.buffer_samples:
             return None
         
         try:
             # Ensure model is loaded (handles deferred loading from warmup)
             self._ensure_model_loaded(model_size)
+            
+            if self._whisper_model is None:
+                logger.error("Whisper model not loaded")
+                return None
             
             # Extract audio chunk for transcription
             audio_chunk = self.audio_buffer[:self.buffer_samples]
@@ -256,10 +266,18 @@ class AudioTranscriptionNode:
                 # Write WAV file using scipy.io.wavfile
                 try:
                     from scipy.io.wavfile import write
-                    write(temp_path, self.sample_rate, audio_chunk)
+                    if self.sample_rate is not None:
+                        write(temp_path, self.sample_rate, audio_chunk)
+                    else:
+                        logger.error("Sample rate not initialized")
+                        return None
                 except ImportError:
                     # Fallback to manual WAV writing if scipy not available
-                    self._write_wav_file(temp_path, audio_chunk, self.sample_rate)
+                    if self.sample_rate is not None:
+                        self._write_wav_file(temp_path, audio_chunk, self.sample_rate)
+                    else:
+                        logger.error("Sample rate not initialized")
+                        return None
                 
                 # Transcribe using whisper
                 language_code = None if language == "auto" else language
@@ -342,13 +360,15 @@ class AudioTranscriptionNode:
                         logger.debug("Exited warmup phase - future empty transcriptions will return None")
                 
                 # Update processing metrics
-                self.total_audio_processed += self.buffer_samples / self.sample_rate
+                if self.buffer_samples is not None and self.sample_rate is not None:
+                    self.total_audio_processed += self.buffer_samples / self.sample_rate
                 self.transcription_count += 1
                 
                 # Advance buffer (keep some overlap for context)
-                overlap_samples = self.buffer_samples // 4  # 25% overlap
-                advance_samples = self.buffer_samples - overlap_samples
-                self.audio_buffer = self.audio_buffer[advance_samples:]
+                if self.buffer_samples is not None:
+                    overlap_samples = self.buffer_samples // 4  # 25% overlap
+                    advance_samples = self.buffer_samples - overlap_samples
+                    self.audio_buffer = self.audio_buffer[advance_samples:]
                 
                 if result:
                     logger.debug(f"Transcribed chunk {self.transcription_count} ({output_format}): '{str(result)[:50]}...' ({len(str(result))} chars)")
@@ -367,7 +387,8 @@ class AudioTranscriptionNode:
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             # Still advance buffer to prevent getting stuck
-            self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
+            if self.buffer_samples is not None:
+                self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
             return None
     
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
@@ -441,7 +462,9 @@ class AudioTranscriptionNode:
             if sample_rate != 16000:
                 logger.warning(f"Non-optimal sample rate {sample_rate}Hz for Whisper (16kHz recommended)")
             
-
+            # Ensure audio_data is a numpy array
+            if not isinstance(audio_data, np.ndarray):
+                audio_data = np.array(audio_data)
             
             # Buffer the audio (primary buffering system - no duplicate buffering)
             ready_for_transcription = self._buffer_audio(audio_data, sample_rate, buffer_duration)
@@ -497,3 +520,242 @@ class AudioTranscriptionNode:
                 logger.debug("Transcription queue full, replaced oldest entry")
             except:
                 logger.warning("Failed to queue transcription")
+
+
+"""
+SRT subtitle generation node for ComfyStream.
+Based on project-transcript SRT generation capabilities.
+"""
+
+import logging
+from datetime import timedelta
+from typing import List, Dict, Any, Union
+import json
+
+logger = logging.getLogger(__name__)
+
+
+class SRTGeneratorNode:
+    """
+    Generate SRT subtitle files from transcription with timing information.
+    Compatible with AudioTranscriptionNode output when word timestamps are enabled.
+    """
+    
+    CATEGORY = "text_utils"
+    RETURN_TYPES = ("STRING",)
+    
+    def __init__(self):
+        self.subtitle_counter = 1
+        
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "transcription_data": ("STRING", {
+                    "tooltip": "Transcription text or JSON with timing data from AudioTranscriptionNode"
+                }),
+                "segment_start_time": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 86400.0,  # 24 hours max
+                    "step": 0.001,
+                    "tooltip": "Start time of this segment in seconds (for absolute timing)"
+                }),
+                "segment_duration": ("FLOAT", {
+                    "default": 3.0,
+                    "min": 0.1,
+                    "max": 60.0,
+                    "step": 0.1,
+                    "tooltip": "Duration of this segment in seconds"
+                }),
+                "use_absolute_time": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Use absolute timing (True) or segment-relative timing (False)"
+                }),
+                "minimum_duration": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.1,
+                    "max": 10.0,
+                    "step": 0.1,
+                    "tooltip": "Minimum subtitle duration in seconds"
+                })
+            }
+        }
+    
+    @classmethod
+    def RETURN_NAMES(cls):
+        return ("srt_content",)
+    
+    FUNCTION = "generate_srt"
+    
+    @classmethod
+    def IS_CHANGED(cls):
+        return float("nan")
+    
+    def generate_srt(self, 
+                    transcription_data: str,
+                    segment_start_time: float = 0.0,
+                    segment_duration: float = 3.0,
+                    use_absolute_time: bool = False,
+                    minimum_duration: float = 1.0) -> tuple:
+        """
+        Generate SRT subtitle content from transcription data.
+        
+        Args:
+            transcription_data: Text transcription or JSON with timing data
+            segment_start_time: Start time of this segment (for absolute timing)
+            segment_duration: Duration of this segment
+            use_absolute_time: Whether to use absolute or segment-relative timing
+            minimum_duration: Minimum subtitle duration
+            
+        Returns:
+            Tuple containing SRT formatted content
+        """
+        try:
+            if not transcription_data or not transcription_data.strip() or len(transcription_data.strip()) < 5:
+                logger.debug(f"Empty or minimal transcription data: '{transcription_data}'")
+                return ("",)
+            
+            # Pass through warmup sentinel values (they'll be filtered later in the pipeline)
+            if "__WARMUP_SENTINEL__" in transcription_data:
+                logger.debug("Passing through warmup sentinel for pipeline detection")
+                return (transcription_data,)
+            
+            # Try to parse as JSON first (if AudioTranscriptionNode supports structured output)
+            segments = self._parse_transcription_data(transcription_data)
+            
+            if not segments:
+                logger.debug("No valid segments found in transcription data")
+                return ("",)
+            
+            # Generate SRT content
+            srt_content = self._generate_srt_from_segments(
+                segments, 
+                segment_start_time,
+                segment_duration,
+                use_absolute_time,
+                minimum_duration
+            )
+            
+            logger.debug(f"Generated SRT with {len(segments)} segments")
+            return (srt_content,)
+            
+        except Exception as e:
+            logger.error(f"Error generating SRT: {e}")
+            return ("",)
+    
+    def _parse_transcription_data(self, data: str) -> List[Dict[str, Any]]:
+        """
+        Parse transcription data into segments.
+        Enhanced to handle AudioTranscriptionNode JSON output formats.
+        """
+        segments = []
+        
+        try:
+            # Try parsing as JSON first
+            parsed_data = json.loads(data)
+            
+            if isinstance(parsed_data, list):
+                # Handle both segment-level and word-level JSON arrays
+                for item in parsed_data:
+                    if isinstance(item, dict):
+                        # Check if it's word-level data (has 'word' field) or segment-level (has 'text' field)
+                        if 'word' in item:
+                            # Word-level JSON from AudioTranscriptionNode (json_words format)
+                            segments.append({
+                                'start': item.get('start', 0.0),
+                                'end': item.get('end', 1.0),
+                                'text': item.get('word', '').strip()
+                            })
+                        elif 'text' in item:
+                            # Segment-level JSON from AudioTranscriptionNode (json_segments format)
+                            segments.append({
+                                'start': item.get('start', 0.0),
+                                'end': item.get('end', 1.0),
+                                'text': item.get('text', '').strip()
+                            })
+                            
+            elif isinstance(parsed_data, dict):
+                # Single segment or word
+                if 'word' in parsed_data:
+                    segments.append({
+                        'start': parsed_data.get('start', 0.0),
+                        'end': parsed_data.get('end', 1.0),
+                        'text': parsed_data.get('word', '').strip()
+                    })
+                elif 'text' in parsed_data:
+                    segments.append({
+                        'start': parsed_data.get('start', 0.0),
+                        'end': parsed_data.get('end', 1.0),
+                        'text': parsed_data.get('text', '').strip()
+                    })
+                    
+        except (json.JSONDecodeError, TypeError):
+            # Fallback to plain text - create a single segment
+            if data.strip():
+                segments.append({
+                    'start': 0.0,
+                    'end': 3.0,  # Default 3-second duration
+                    'text': data.strip()
+                })
+        
+        return [seg for seg in segments if seg['text']]  # Filter empty text
+    
+    def _generate_srt_from_segments(self, 
+                                   segments: List[Dict[str, Any]],
+                                   segment_start_time: float,
+                                   segment_duration: float,
+                                   use_absolute_time: bool,
+                                   minimum_duration: float) -> str:
+        """
+        Generate SRT content from parsed segments.
+        """
+        srt_lines = []
+        
+        for i, segment in enumerate(segments):
+            text = segment['text'].strip()
+            if not text:
+                continue
+            
+            # Calculate timing
+            if use_absolute_time:
+                # Absolute timing: add segment start time
+                start_time = segment_start_time + segment['start']
+                end_time = segment_start_time + segment['end']
+            else:
+                # Segment-relative timing
+                start_time = segment['start']
+                end_time = segment['end']
+            
+            # Ensure minimum duration
+            if end_time - start_time < minimum_duration:
+                end_time = start_time + minimum_duration
+            
+            # Format timing
+            start_srt = self._seconds_to_srt_time(start_time)
+            end_srt = self._seconds_to_srt_time(end_time)
+            
+            # Add SRT entry
+            srt_lines.append(str(self.subtitle_counter))
+            srt_lines.append(f"{start_srt} --> {end_srt}")
+            srt_lines.append(text)
+            srt_lines.append("")  # Blank line
+            
+            self.subtitle_counter += 1
+        
+        return "\n".join(srt_lines)
+    
+    def _seconds_to_srt_time(self, seconds: float) -> str:
+        """
+        Convert seconds to SRT time format (HH:MM:SS,mmm).
+        Compatible with project-transcript format.
+        """
+        td = timedelta(seconds=seconds)
+        total_seconds = int(td.total_seconds())
+        milliseconds = int((seconds - total_seconds) * 1000)
+        
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        secs = total_seconds % 60
+        
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
