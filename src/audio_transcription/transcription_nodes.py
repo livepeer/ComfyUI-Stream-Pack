@@ -141,7 +141,7 @@ class AudioTranscriptionNode:
             device=device, 
             compute_type=compute_type
         )
-        self._model_size_name = model_size
+        self._whisper_model.model_size_name = model_size
         logger.info(f"Whisper model '{model_size}' loaded successfully on {device}")
 
     def _ensure_model_loaded(self, model_size: str):
@@ -182,19 +182,15 @@ class AudioTranscriptionNode:
             self.audio_buffer = np.concatenate([self.audio_buffer, audio_input])
         
         # Update buffer duration
-        if self.sample_rate is not None:
-            self.buffer_duration = len(self.audio_buffer) / self.sample_rate
+        self.buffer_duration = len(self.audio_buffer) / self.sample_rate
         
         # Check if we have enough audio for transcription
-        if self.buffer_samples is not None:
-            ready = len(self.audio_buffer) >= self.buffer_samples
-            
-            if ready:
-                logger.debug(f"Audio buffer ready for transcription: {self.buffer_duration:.2f}s ({len(self.audio_buffer)} samples)")
-            
-            return ready
+        ready = len(self.audio_buffer) >= self.buffer_samples
         
-        return False
+        if ready:
+            logger.debug(f"Audio buffer ready for transcription: {self.buffer_duration:.2f}s ({len(self.audio_buffer)} samples)")
+        
+        return ready
     
     def _normalize_audio_for_whisper(self, audio_input: np.ndarray) -> np.ndarray:
         """
@@ -234,16 +230,12 @@ class AudioTranscriptionNode:
     
     def _transcribe_audio_buffer(self, model_size: str, language: str, enable_vad: bool, output_format: str = "json_segments") -> Optional[str]:
         """Transcribe the current audio buffer and return combined text."""
-        if self.buffer_samples is None or len(self.audio_buffer) < self.buffer_samples:
+        if len(self.audio_buffer) < self.buffer_samples:
             return None
         
         try:
             # Ensure model is loaded (handles deferred loading from warmup)
             self._ensure_model_loaded(model_size)
-            
-            if self._whisper_model is None:
-                logger.error("Whisper model not loaded")
-                return None
             
             # Extract audio chunk for transcription
             audio_chunk = self.audio_buffer[:self.buffer_samples]
@@ -256,18 +248,10 @@ class AudioTranscriptionNode:
                 # Write WAV file using scipy.io.wavfile
                 try:
                     from scipy.io.wavfile import write
-                    if self.sample_rate is not None:
-                        write(temp_path, self.sample_rate, audio_chunk)
-                    else:
-                        logger.error("Sample rate not initialized")
-                        return None
+                    write(temp_path, self.sample_rate, audio_chunk)
                 except ImportError:
                     # Fallback to manual WAV writing if scipy not available
-                    if self.sample_rate is not None:
-                        self._write_wav_file(temp_path, audio_chunk, self.sample_rate)
-                    else:
-                        logger.error("Sample rate not initialized")
-                        return None
+                    self._write_wav_file(temp_path, audio_chunk, self.sample_rate)
                 
                 # Transcribe using whisper
                 language_code = None if language == "auto" else language
@@ -350,15 +334,13 @@ class AudioTranscriptionNode:
                         logger.debug("Exited warmup phase - future empty transcriptions will return None")
                 
                 # Update processing metrics
-                if self.buffer_samples is not None and self.sample_rate is not None:
-                    self.total_audio_processed += self.buffer_samples / self.sample_rate
+                self.total_audio_processed += self.buffer_samples / self.sample_rate
                 self.transcription_count += 1
                 
                 # Advance buffer (keep some overlap for context)
-                if self.buffer_samples is not None:
-                    overlap_samples = self.buffer_samples // 4  # 25% overlap
-                    advance_samples = self.buffer_samples - overlap_samples
-                    self.audio_buffer = self.audio_buffer[advance_samples:]
+                overlap_samples = self.buffer_samples // 4  # 25% overlap
+                advance_samples = self.buffer_samples - overlap_samples
+                self.audio_buffer = self.audio_buffer[advance_samples:]
                 
                 if result:
                     logger.debug(f"Transcribed chunk {self.transcription_count} ({output_format}): '{str(result)[:50]}...' ({len(str(result))} chars)")
@@ -377,8 +359,7 @@ class AudioTranscriptionNode:
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             # Still advance buffer to prevent getting stuck
-            if self.buffer_samples is not None:
-                self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
+            self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
             return None
     
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
@@ -452,9 +433,7 @@ class AudioTranscriptionNode:
             if sample_rate != 16000:
                 logger.warning(f"Non-optimal sample rate {sample_rate}Hz for Whisper (16kHz recommended)")
             
-            # Ensure audio_data is a numpy array
-            if not isinstance(audio_data, np.ndarray):
-                audio_data = np.array(audio_data)
+
             
             # Buffer the audio (primary buffering system - no duplicate buffering)
             ready_for_transcription = self._buffer_audio(audio_data, sample_rate, buffer_duration)
