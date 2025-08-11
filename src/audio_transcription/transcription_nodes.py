@@ -16,11 +16,15 @@ from typing import Optional, List, Deque, Dict, Any
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-import threading
 from queue import Queue, Empty
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
+
+
+class CriticalTranscriptionError(Exception):
+    """Raised for unrecoverable errors where the stream should stop."""
+    pass
 
 
 @dataclass
@@ -38,6 +42,22 @@ class AudioTranscriptionNode:
     transcribed text on a controlled schedule to prevent message flooding.
     """
     
+    # ------------------------------------------------------------------
+    # Configurable class attributes (easy future exposure via UI):
+    #   MAX_TOTAL_BUFFER_SECONDS : Hard cap on rolling audio kept in memory
+    #   OVERLAP_RATIO            : Portion of previous buffer kept for next pass (0 < r < 1)
+    #   TRANSCRIPTION_QUEUE_MAXLEN: Max queued outputs waiting for timing window
+    #   WORD_TIMESTAMPS / BEAM_SIZE / BEST_OF : Whisper inference params
+    #   DEFAULT_VAD              : Default Voice Activity Detection toggle
+    # ------------------------------------------------------------------
+    MAX_TOTAL_BUFFER_SECONDS = 60
+    OVERLAP_RATIO = 0.25  # 25% overlap by default
+    TRANSCRIPTION_QUEUE_MAXLEN = 50
+    WORD_TIMESTAMPS = True
+    BEAM_SIZE = 1
+    BEST_OF = 1
+    DEFAULT_VAD = True
+
     CATEGORY = "audio_utils"
     RETURN_TYPES = ("STRING",)
     
@@ -47,13 +67,13 @@ class AudioTranscriptionNode:
         self.buffer_duration = 0.0  # Duration in seconds
         self.sample_rate = None
         self.buffer_samples = None
+        self.max_total_buffer_samples = None  # derived once sample_rate known
         
-        # Whisper model (shared across instances)
+        # Whisper model (per-instance lazy load)
         self._whisper_model = None
-        self._model_lock = threading.Lock()
         
         # Transcription queue for controlled output
-        self.transcription_queue: Deque[str] = deque(maxlen=50)
+        self.transcription_queue: Deque[str] = deque(maxlen=self.TRANSCRIPTION_QUEUE_MAXLEN)
         self.last_output_time = 0.0
         
         # Processing state
@@ -92,7 +112,7 @@ class AudioTranscriptionNode:
                     "tooltip": "Language for transcription (auto = auto-detect)"
                 }),
                 "enable_vad": ("BOOLEAN", {
-                    "default": True,
+                    "default": cls.DEFAULT_VAD,
                     "tooltip": "Enable Voice Activity Detection to filter silence"
                 })
             },
@@ -112,54 +132,47 @@ class AudioTranscriptionNode:
     
 
 
-    def _initialize_whisper_model(self, model_size: str):
-        """Initialize the Whisper model if not already loaded."""
-        with self._model_lock:
-            # Load model if not already loaded or if different size requested
-            if (self._whisper_model is None or 
-                getattr(self._whisper_model, 'model_size_name', '') != model_size):
-                
-                logger.info(f"Loading Whisper model: {model_size}")
-                self._load_whisper_model_now(model_size)
-
-
-
     def _load_whisper_model_now(self, model_size: str):
         """Load the Whisper model using faster-whisper's automatic download."""
         # Use CPU for compatibility, can be changed to CUDA if available
         device = "cpu"
         try:
             # Try CUDA first if available
-            import torch
+            import torch  # type: ignore
             if torch.cuda.is_available():
                 device = "cuda"
                 compute_type = "float16"
             else:
                 compute_type = "int8"
-        except:
+        except Exception:
             compute_type = "int8"
-        
-        # Let faster-whisper handle model downloading and caching automatically
-        # This ensures we get the correct file structure (vocabulary.txt, etc.)
+
         logger.info(f"Loading Whisper model via faster-whisper: {model_size}")
-        
-        self._whisper_model = WhisperModel(
-            model_size, 
-            device=device, 
-            compute_type=compute_type
-        )
-        self._whisper_model.model_size_name = model_size
-        logger.info(f"Whisper model '{model_size}' loaded successfully on {device}")
+        try:
+            self._whisper_model = WhisperModel(
+                model_size,
+                device=device,
+                compute_type=compute_type
+            )
+            # Attach size name for change detection
+            self._whisper_model.model_size_name = model_size  # type: ignore[attr-defined]
+            logger.info(f"Whisper model '{model_size}' loaded successfully on {device}")
+        except (MemoryError, RuntimeError) as e:
+            logger.error(f"Critical: Failed to load Whisper model '{model_size}' due to resource issue: {e}")
+            raise CriticalTranscriptionError(f"Model load failed (resources): {e}") from e
+        except OSError as e:
+            logger.error(f"Critical: Filesystem/model download issue for '{model_size}': {e}")
+            raise CriticalTranscriptionError(f"Filesystem/model download failure: {e}") from e
+        except Exception as e:
+            logger.error(f"Critical: Unexpected error loading model '{model_size}': {e}")
+            raise CriticalTranscriptionError(f"Unexpected model load error: {e}") from e
 
     def _ensure_model_loaded(self, model_size: str):
-        """Ensure the Whisper model is loaded and ready for transcription."""
-        with self._model_lock:
-            # Check if we need to load or switch models
-            if (self._whisper_model is None or 
-                getattr(self._whisper_model, 'model_size_name', '') != model_size):
-                
-                logger.info(f"Loading Whisper model: {model_size}")
-                self._load_whisper_model_now(model_size)
+        """Ensure the Whisper model is loaded."""
+        if (self._whisper_model is None or 
+            getattr(self._whisper_model, 'model_size_name', '') != model_size):
+            logger.info(f"Loading Whisper model: {model_size}")
+            self._load_whisper_model_now(model_size)
     
 
     
@@ -173,6 +186,7 @@ class AudioTranscriptionNode:
         if self.sample_rate is None:
             self.sample_rate = sample_rate
             self.buffer_samples = int(self.sample_rate * buffer_duration)
+            self.max_total_buffer_samples = int(self.sample_rate * self.MAX_TOTAL_BUFFER_SECONDS)
             logger.info(f"Initialized Whisper-optimized audio buffer: {buffer_duration}s at {sample_rate}Hz = {self.buffer_samples} samples")
         
         # Skip empty frames (from streaming loader)
@@ -188,10 +202,18 @@ class AudioTranscriptionNode:
         else:
             self.audio_buffer = np.concatenate([self.audio_buffer, audio_input])
         
+        # Enforce maximum total buffer size (keep most recent samples)
+        if self.max_total_buffer_samples and len(self.audio_buffer) > self.max_total_buffer_samples:
+            overflow = len(self.audio_buffer) - self.max_total_buffer_samples
+            logger.debug(f"Audio buffer exceeded max ({len(self.audio_buffer)} > {self.max_total_buffer_samples}), trimming oldest {overflow} samples")
+            self.audio_buffer = self.audio_buffer[-self.max_total_buffer_samples:]
+        
         # Update buffer duration
         self.buffer_duration = len(self.audio_buffer) / self.sample_rate
         
         # Check if we have enough audio for transcription
+        if self.buffer_samples is None:
+            return False
         ready = len(self.audio_buffer) >= self.buffer_samples
         
         if ready:
@@ -237,136 +259,139 @@ class AudioTranscriptionNode:
     
     def _transcribe_audio_buffer(self, model_size: str, language: str, enable_vad: bool, output_format: str = "json_segments") -> Optional[str]:
         """Transcribe the current audio buffer and return combined text."""
-        if len(self.audio_buffer) < self.buffer_samples:
+        if self.buffer_samples is None or len(self.audio_buffer) < self.buffer_samples:
             return None
-        
         try:
             # Ensure model is loaded (handles deferred loading from warmup)
             self._ensure_model_loaded(model_size)
-            
+
             # Extract audio chunk for transcription
             audio_chunk = self.audio_buffer[:self.buffer_samples]
-            
+
             # Save audio to temporary WAV file for whisper
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                 temp_path = temp_file.name
-            
+
             try:
                 # Write WAV file using scipy.io.wavfile
                 try:
-                    from scipy.io.wavfile import write
-                    write(temp_path, self.sample_rate, audio_chunk)
+                    from scipy.io.wavfile import write  # type: ignore
+                    write(temp_path, int(self.sample_rate or 16000), audio_chunk)
                 except ImportError:
                     # Fallback to manual WAV writing if scipy not available
-                    self._write_wav_file(temp_path, audio_chunk, self.sample_rate)
-                
-                # Transcribe using whisper
+                    self._write_wav_file(temp_path, audio_chunk, int(self.sample_rate or 16000))
+
                 language_code = None if language == "auto" else language
-                segments, info = self._whisper_model.transcribe(
+                segments, info = self._whisper_model.transcribe(  # type: ignore[attr-defined]
                     temp_path,
-                                    language=language_code,
-                word_timestamps=True,  # Enable for SRT generation
-                vad_filter=enable_vad,
-                    beam_size=1,  # Faster transcription
-                    best_of=1     # Faster transcription
+                    language=language_code,
+                    word_timestamps=self.WORD_TIMESTAMPS,
+                    vad_filter=enable_vad,
+                    beam_size=self.BEAM_SIZE,
+                    best_of=self.BEST_OF
                 )
-                
-                # Format output based on requested format
+
+                # Format output
                 if output_format == "text":
-                    # Simple text output (original behavior)
-                    transcribed_texts = []
-                    for segment in segments:
-                        if segment.text.strip():
-                            transcribed_texts.append(segment.text.strip())
-                    result = " ".join(transcribed_texts)
-                    
+                    texts = [s.text.strip() for s in segments if s.text and s.text.strip()]
+                    result = " ".join(texts)
                 elif output_format == "json_segments":
-                    # Segment-level JSON output (like project-transcript)
-                    segments_data = []
-                    for segment in segments:
-                        if segment.text.strip():
-                            segments_data.append({
-                                "start": segment.start,
-                                "end": segment.end,
-                                "text": segment.text.strip()
-                            })
-                    result = json.dumps(segments_data, ensure_ascii=False)
-                    
+                    seg_list = [
+                        {"start": s.start, "end": s.end, "text": s.text.strip()}
+                        for s in segments if s.text and s.text.strip()
+                    ]
+                    result = json.dumps(seg_list, ensure_ascii=False)
                 elif output_format == "json_words":
-                    # Word-level JSON output (detailed timing)
-                    words_data = []
-                    for segment in segments:
-                        if hasattr(segment, 'words') and segment.words:
-                            for word in segment.words:
-                                if word.word.strip():
-                                    words_data.append({
-                                        "start": word.start,
-                                        "end": word.end, 
-                                        "word": word.word.strip(),
-                                        "probability": getattr(word, 'probability', 1.0)
+                    words = []
+                    for s in segments:
+                        s_words = getattr(s, 'words', None)
+                        if s_words:
+                            for w in s_words:
+                                if w.word.strip():
+                                    words.append({
+                                        "start": w.start,
+                                        "end": w.end,
+                                        "word": w.word.strip(),
+                                        "probability": getattr(w, 'probability', 1.0)
                                     })
-                        elif segment.text.strip():
-                            # Fallback if word-level timing not available
-                            words_data.append({
-                                "start": segment.start,
-                                "end": segment.end,
-                                "word": segment.text.strip(),
+                        elif s.text and s.text.strip():
+                            words.append({
+                                "start": s.start,
+                                "end": s.end,
+                                "word": s.text.strip(),
                                 "probability": 1.0
                             })
-                    result = json.dumps(words_data, ensure_ascii=False)
+                    result = json.dumps(words, ensure_ascii=False)
                 else:
                     result = None
-                
-                # Only generate sentinel values during warmup phase
+
+                # Sentinel logic
                 if not result or (output_format in ["json_segments", "json_words"] and result == "[]"):
                     if self.warmup_phase:
-                        # Return sentinel value to indicate the pipeline is working during warmup
                         if output_format == "text":
                             result = "__WARMUP_SENTINEL__"
                         elif output_format == "json_segments":
-                            result = json.dumps([{"start": 0.0, "end": 1.0, "text": "__WARMUP_SENTINEL__"}])
+                            result = json.dumps([{ "start": 0.0, "end": 1.0, "text": "__WARMUP_SENTINEL__"}])
                         elif output_format == "json_words":
-                            result = json.dumps([{"start": 0.0, "end": 1.0, "word": "__WARMUP_SENTINEL__", "probability": 1.0}])
-                        logger.debug(f"No transcription produced during warmup, returning sentinel value")
+                            result = json.dumps([{ "start": 0.0, "end": 1.0, "word": "__WARMUP_SENTINEL__", "probability": 1.0}])
+                        logger.debug("Warmup sentinel emitted")
                     else:
-                        # During normal operation, return None for empty transcriptions
-                        result = ""  # Return empty string for ComfyUI compatibility 
+                        result = ""  # Return empty string for ComfyUI compatibility
                         logger.debug(f"No transcription produced during normal operation, returning empty")
-                
-                # Track successful transcriptions and exit warmup phase
-                if result and not ("__WARMUP_SENTINEL__" in result):
+
+                if result and "__WARMUP_SENTINEL__" not in str(result):
                     self.successful_transcriptions += 1
-                    if self.successful_transcriptions >= 2:
+                    if self.successful_transcriptions == 1:
+                        logger.info("First successful transcription received. Workflow warmup complete")
+                    if self.successful_transcriptions >= 2 and self.warmup_phase:
                         self.warmup_phase = False
-                        logger.debug("Exited warmup phase - future empty transcriptions will return None")
-                
-                # Update processing metrics
-                self.total_audio_processed += self.buffer_samples / self.sample_rate
+                        logger.debug("Exited warmup phase")
+
+                # Metrics
+                if self.sample_rate and self.buffer_samples:
+                    self.total_audio_processed += self.buffer_samples / self.sample_rate
                 self.transcription_count += 1
-                
-                # Advance buffer (keep some overlap for context)
-                overlap_samples = self.buffer_samples // 4  # 25% overlap
-                advance_samples = self.buffer_samples - overlap_samples
-                self.audio_buffer = self.audio_buffer[advance_samples:]
-                
+
+                # Advance buffer with configurable overlap
+                if self.buffer_samples:
+                    overlap_samples = int(self.buffer_samples * self.OVERLAP_RATIO)
+                    # safety clamps
+                    if overlap_samples < 0:
+                        overlap_samples = 0
+                    if overlap_samples >= self.buffer_samples:
+                        overlap_samples = self.buffer_samples - 1
+                    advance_samples = self.buffer_samples - overlap_samples
+                    self.audio_buffer = self.audio_buffer[advance_samples:]
+
                 if result:
-                    logger.debug(f"Transcribed chunk {self.transcription_count} ({output_format}): '{str(result)[:50]}...' ({len(str(result))} chars)")
+                    logger.debug(
+                        f"Transcribed chunk {self.transcription_count} ({output_format}): '{str(result)[:50]}...' ({len(str(result))} chars)"
+                    )
                 else:
-                    logger.debug(f"Transcribed chunk {self.transcription_count} ({output_format}): No result")
-                
+                    logger.debug(f"Transcribed chunk {self.transcription_count} produced no result")
                 return result
-                
             finally:
-                # Clean up temp file
                 try:
                     os.unlink(temp_path)
-                except:
-                    pass
-                    
+                except FileNotFoundError:
+                    logger.debug(f"Temp transcription file already removed: {temp_path}")
+                except PermissionError as e:
+                    logger.warning(f"Permission error removing temp file {temp_path}: {e}")
+                except OSError as e:
+                    logger.warning(f"OS error removing temp file {temp_path}: {e}")
+                except Exception as e:
+                    logger.warning(f"Unexpected error removing temp file {temp_path}: {e}")
+        except CriticalTranscriptionError:
+            # Propagate critical to stop workflow
+            raise
+        except (MemoryError, OSError) as e:
+            logger.error(f"Critical transcription failure: {e}")
+            raise CriticalTranscriptionError(f"Critical transcription failure: {e}") from e
         except Exception as e:
-            logger.error(f"Error transcribing audio: {e}")
-            # Still advance buffer to prevent getting stuck
-            self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
+            logger.warning(f"Non-critical transcription error, skipping chunk: {e}")
+            # Advance half buffer to avoid being stuck
+            if self.buffer_samples:
+                self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
             return None
     
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
@@ -440,6 +465,10 @@ class AudioTranscriptionNode:
             if sample_rate != 16000:
                 logger.warning(f"Non-optimal sample rate {sample_rate}Hz for Whisper (16kHz recommended)")
             
+            # Ensure audio_data is a numpy array before buffering
+            if not isinstance(audio_data, np.ndarray):
+                logger.debug(f"Converting audio_data from {type(audio_data)} to numpy array.")
+                audio_data = np.array(audio_data, dtype=np.float32)
 
             
             # Buffer the audio (primary buffering system - no duplicate buffering)
@@ -480,20 +509,16 @@ class AudioTranscriptionNode:
             # Return empty string if not ready to output (SaveTextTensor will filter empty content)
             return ("",)
             
+        except CriticalTranscriptionError as e:
+            logger.error(f"Critical error in transcription node: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Error in audio transcription execute: {e}")
+            logger.error(f"Recoverable execute error: {e}")
             return ("",)
     
     def _queue_transcription(self, transcription: str):
         """Safely queue transcription for controlled output."""
-        try:
-            self.transcription_queue.append(transcription)
-        except:
-            # Queue full, remove oldest and add new
-            try:
-                self.transcription_queue.popleft()
-                self.transcription_queue.append(transcription)
-                logger.debug("Transcription queue full, replaced oldest entry")
-            except:
-                logger.warning("Failed to queue transcription")
+        if len(self.transcription_queue) == self.transcription_queue.maxlen:
+            logger.debug("Transcription queue is full, oldest entry will be replaced.")
+        self.transcription_queue.append(transcription)
 
