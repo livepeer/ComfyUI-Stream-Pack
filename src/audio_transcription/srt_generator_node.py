@@ -184,9 +184,9 @@ class SRTGeneratorNode:
                                    use_absolute_time: bool,
                                    minimum_duration: float) -> str:
         """
-        Generate SRT content from parsed segments.
+        Generate SRT content from parsed segments and wrap it in a JSON format.
         """
-        srt_lines = []
+        subtitles = []
         
         for i, segment in enumerate(segments):
             text = segment['text'].strip()
@@ -211,15 +211,18 @@ class SRTGeneratorNode:
             start_srt = self._seconds_to_srt_time(start_time)
             end_srt = self._seconds_to_srt_time(end_time)
             
-            # Add SRT entry
-            srt_lines.append(str(self.subtitle_counter))
-            srt_lines.append(f"{start_srt} --> {end_srt}")
-            srt_lines.append(text)
-            srt_lines.append("")  # Blank line
+            # Add subtitle entry to list
+            subtitles.append({
+                "id": self.subtitle_counter,
+                "start": start_srt,
+                "end": end_srt,
+                "text": text
+            })
             
             self.subtitle_counter += 1
         
-        return "\n".join(srt_lines)
+        # Return as a JSON string
+        return json.dumps(subtitles, indent=2)
     
     def _seconds_to_srt_time(self, seconds: float) -> str:
         """
