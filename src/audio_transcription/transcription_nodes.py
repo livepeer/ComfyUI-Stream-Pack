@@ -51,8 +51,8 @@ class AudioTranscriptionNode:
     #   DEFAULT_VAD              : Default Voice Activity Detection toggle
     # ------------------------------------------------------------------
     MAX_TOTAL_BUFFER_SECONDS = 60
-    OVERLAP_RATIO = 0.25  # 25% overlap by default
-    TRANSCRIPTION_QUEUE_MAXLEN = 50
+    OVERLAP_RATIO = 0.25 # 25% overlap by default
+    TRANSCRIPTION_QUEUE_MAXLEN = 100
     WORD_TIMESTAMPS = True
     BEAM_SIZE = 1
     BEST_OF = 1
@@ -80,9 +80,7 @@ class AudioTranscriptionNode:
         self.total_audio_processed = 0.0  # Total audio time processed
         self.transcription_count = 0
         
-        # Warmup state - only generate sentinels during initial warmup phase
-        self.warmup_phase = True
-        self.successful_transcriptions = 0
+
         
     @classmethod
     def INPUT_TYPES(cls):
@@ -90,7 +88,7 @@ class AudioTranscriptionNode:
             "required": {
                 "audio": ("WAVEFORM",),  # Input from LoadAudioTensor
                 "transcription_interval": ("FLOAT", {
-                    "default": 4.0, 
+                    "default": 2.0, 
                     "min": 1.0, 
                     "max": 30.0,
                     "step": 0.5,
@@ -98,8 +96,8 @@ class AudioTranscriptionNode:
                 }),
                 "buffer_duration": ("FLOAT", {
                     "default": 4.0,
-                    "min": 2.0, 
-                    "max": 15.0,
+                    "min": 4.0, 
+                    "max": 30.0,
                     "step": 0.5,
                     "tooltip": "Audio buffer duration in seconds for transcription"
                 }),
@@ -167,14 +165,14 @@ class AudioTranscriptionNode:
             logger.error(f"Critical: Unexpected error loading model '{model_size}': {e}")
             raise CriticalTranscriptionError(f"Unexpected model load error: {e}") from e
 
-    def _ensure_model_loaded(self, model_size: str):
-        """Ensure the Whisper model is loaded."""
+    def _ensure_model_loaded(self, model_size: str) -> bool:
+        """Ensure the Whisper model is loaded. Returns True if a fresh load occurred."""
         if (self._whisper_model is None or 
             getattr(self._whisper_model, 'model_size_name', '') != model_size):
             logger.info(f"Loading Whisper model: {model_size}")
             self._load_whisper_model_now(model_size)
-    
-
+            return True
+        return False
     
     def _buffer_audio(self, audio_input: np.ndarray, sample_rate: int, buffer_duration: float):
         """
@@ -193,7 +191,6 @@ class AudioTranscriptionNode:
         if audio_input is None or audio_input.size == 0:
             return False
         
-        # Ensure audio is in the right format for Whisper
         audio_input = self._normalize_audio_for_whisper(audio_input)
         
         # Add to buffer - concatenate efficiently
@@ -204,8 +201,6 @@ class AudioTranscriptionNode:
         
         # Enforce maximum total buffer size (keep most recent samples)
         if self.max_total_buffer_samples and len(self.audio_buffer) > self.max_total_buffer_samples:
-            overflow = len(self.audio_buffer) - self.max_total_buffer_samples
-            logger.debug(f"Audio buffer exceeded max ({len(self.audio_buffer)} > {self.max_total_buffer_samples}), trimming oldest {overflow} samples")
             self.audio_buffer = self.audio_buffer[-self.max_total_buffer_samples:]
         
         # Update buffer duration
@@ -223,12 +218,8 @@ class AudioTranscriptionNode:
     
     def _normalize_audio_for_whisper(self, audio_input: np.ndarray) -> np.ndarray:
         """
-        Normalize audio specifically for Whisper requirements.
-        
-        Whisper expects:
-        - 16-bit PCM audio (int16)
-        - Mono channel
-        - 16 kHz sample rate (handled by LoadAudioTensorStream)
+        Minimal audio normalization to avoid artifacts.
+        Assumes LoadAudioTensorStream has already done most processing.
         """
         if audio_input is None or audio_input.size == 0:
             return np.array([], dtype=np.int16)
@@ -237,48 +228,76 @@ class AudioTranscriptionNode:
         if not isinstance(audio_input, np.ndarray):
             audio_input = np.array(audio_input)
         
-        # Handle multi-channel audio (take first channel for transcription)
-        if audio_input.ndim > 1:
-            if audio_input.shape[1] > audio_input.shape[0]:
-                # Shape is (samples, channels) - take first channel
-                audio_input = audio_input[:, 0]
-            else:
-                # Shape is (channels, samples) - take first channel  
-                audio_input = audio_input[0, :]
+        # If it's already int16 and 1D, return as-is
+        if audio_input.dtype == np.int16 and audio_input.ndim == 1:
+            return audio_input
         
-        # Convert to int16 format for Whisper
+        # Handle multi-channel by taking first channel only
+        if audio_input.ndim > 1:
+            audio_input = audio_input.flatten() if audio_input.size < 1000 else audio_input[:, 0] if audio_input.shape[1] > audio_input.shape[0] else audio_input[0, :]
+        
+        # Convert to int16 only if necessary
         if audio_input.dtype != np.int16:
             if audio_input.dtype in [np.float32, np.float64]:
-                # Convert from float [-1, 1] to int16 [-32768, 32767]
-                audio_input = np.clip(audio_input, -1.0, 1.0)
-                audio_input = (audio_input * 32767).astype(np.int16)
+                # Very conservative conversion to avoid clipping artifacts
+                audio_input = np.clip(audio_input, -0.99, 0.99)  # Leave headroom
+                audio_input = (audio_input * 32000).astype(np.int16)  # Slightly lower scale
             else:
                 audio_input = audio_input.astype(np.int16)
         
         return audio_input
     
-    def _transcribe_audio_buffer(self, model_size: str, language: str, enable_vad: bool, output_format: str = "json_segments") -> Optional[str]:
+
+    
+    def _transcribe_audio_buffer(self, model_size: str, language: str, enable_vad: bool, batch_size: int, output_format: str = "json_segments") -> Optional[str]:
         """Transcribe the current audio buffer and return combined text."""
         if self.buffer_samples is None or len(self.audio_buffer) < self.buffer_samples:
             return None
         try:
-            # Ensure model is loaded (handles deferred loading from warmup)
-            self._ensure_model_loaded(model_size)
+            # Ensure model is loaded; if it was freshly loaded, emit a single warmup sentinel
+            send_warmup_sentinel = self._ensure_model_loaded(model_size)
+            # Emit a single warmup sentinel immediately after model loading completes
+            if send_warmup_sentinel:
+                if output_format == "text":
+                    result = "__WARMUP_SENTINEL__"
+                elif output_format == "json_segments":
+                    result = json.dumps([{ "start": 0.0, "end": 1.0, "text": "__WARMUP_SENTINEL__"}])
+                elif output_format == "json_words":
+                    result = json.dumps([{ "start": 0.0, "end": 1.0, "word": "__WARMUP_SENTINEL__", "probability": 1.0}])
+                else:
+                    result = "__WARMUP_SENTINEL__"
+                logger.debug("Warmup sentinel emitted once after model load")
+                return result
 
             # Extract audio chunk for transcription
             audio_chunk = self.audio_buffer[:self.buffer_samples]
+            
+            # Validate audio chunk quality before transcription
+            if len(audio_chunk) != self.buffer_samples:
+                logger.warning(f"Audio chunk size mismatch: expected {self.buffer_samples}, got {len(audio_chunk)}")
+                return None
+            
+            # Check for audio artifacts (all zeros, extreme values, etc.)
+            if np.all(audio_chunk == 0):
+                return ""
+            
+            # Check for clipping or extreme values that might cause hallucinations
+            if np.abs(audio_chunk).max() < 100:  # Very quiet audio
+                return ""
 
             # Save audio to temporary WAV file for whisper
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                 temp_path = temp_file.name
 
             try:
-                # Write WAV file using scipy.io.wavfile
+                # Write clean WAV file to avoid format conversion artifacts
                 try:
                     from scipy.io.wavfile import write  # type: ignore
-                    write(temp_path, int(self.sample_rate or 16000), audio_chunk)
+                    # Ensure audio is properly scaled for WAV format
+                    clean_audio = np.copy(audio_chunk)
+                    write(temp_path, int(self.sample_rate or 16000), clean_audio)
                 except ImportError:
-                    # Fallback to manual WAV writing if scipy not available
+                    # Fallback to manual WAV writing
                     self._write_wav_file(temp_path, audio_chunk, int(self.sample_rate or 16000))
 
                 language_code = None if language == "auto" else language
@@ -291,7 +310,7 @@ class AudioTranscriptionNode:
                     best_of=self.BEST_OF
                 )
 
-                # Format output
+                # Simple format output without complex deduplication (causes accuracy issues)
                 if output_format == "text":
                     texts = [s.text.strip() for s in segments if s.text and s.text.strip()]
                     result = " ".join(texts)
@@ -325,27 +344,10 @@ class AudioTranscriptionNode:
                 else:
                     result = None
 
-                # Sentinel logic
                 if not result or (output_format in ["json_segments", "json_words"] and result == "[]"):
-                    if self.warmup_phase:
-                        if output_format == "text":
-                            result = "__WARMUP_SENTINEL__"
-                        elif output_format == "json_segments":
-                            result = json.dumps([{ "start": 0.0, "end": 1.0, "text": "__WARMUP_SENTINEL__"}])
-                        elif output_format == "json_words":
-                            result = json.dumps([{ "start": 0.0, "end": 1.0, "word": "__WARMUP_SENTINEL__", "probability": 1.0}])
-                        logger.debug("Warmup sentinel emitted")
-                    else:
-                        result = ""  # Return empty string for ComfyUI compatibility
-                        logger.debug(f"No transcription produced during normal operation, returning empty")
+                    result = ""  # Return empty string for ComfyUI compatibility
+                    logger.debug(f"No transcription produced, returning empty")
 
-                if result and "__WARMUP_SENTINEL__" not in str(result):
-                    self.successful_transcriptions += 1
-                    if self.successful_transcriptions == 1:
-                        logger.info("First successful transcription received. Workflow warmup complete")
-                    if self.successful_transcriptions >= 2 and self.warmup_phase:
-                        self.warmup_phase = False
-                        logger.debug("Exited warmup phase")
 
                 # Metrics
                 if self.sample_rate and self.buffer_samples:
@@ -355,7 +357,6 @@ class AudioTranscriptionNode:
                 # Advance buffer with configurable overlap
                 if self.buffer_samples:
                     overlap_samples = int(self.buffer_samples * self.OVERLAP_RATIO)
-                    # safety clamps
                     if overlap_samples < 0:
                         overlap_samples = 0
                     if overlap_samples >= self.buffer_samples:
@@ -415,12 +416,7 @@ class AudioTranscriptionNode:
         # Fallback to timing interval only if queue is empty
         current_time = time.time()
         
-        # During warmup phase, use shorter intervals to speed up warmup detection
-        if self.warmup_phase:
-            effective_interval = min(transcription_interval, 2.0)  # Max 2 seconds during warmup
-            logger.debug(f"Warmup phase - using {effective_interval}s interval instead of {transcription_interval}s")
-        else:
-            effective_interval = transcription_interval
+        effective_interval = transcription_interval
             
         return (current_time - self.last_output_time) >= effective_interval
     
@@ -476,7 +472,7 @@ class AudioTranscriptionNode:
             
             # Transcribe if buffer has enough audio
             if ready_for_transcription:
-                transcription = self._transcribe_audio_buffer(whisper_model, language, enable_vad, output_format)
+                transcription = self._transcribe_audio_buffer(whisper_model, language, enable_vad, 16, output_format)
                 if transcription and transcription.strip() and len(transcription.strip()) > 5:
                     # Add to queue for controlled output timing (only substantial content or warmup sentinels)
                     self._queue_transcription(transcription)
