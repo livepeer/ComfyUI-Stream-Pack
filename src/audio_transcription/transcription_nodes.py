@@ -44,30 +44,36 @@ class AudioTranscriptionNode:
     
     # ------------------------------------------------------------------
     # Configurable class attributes (easy future exposure via UI):
-    #   MAX_TOTAL_BUFFER_SECONDS : Hard cap on rolling audio kept in memory
-    #   OVERLAP_RATIO            : Portion of previous buffer kept for next pass (0 < r < 1)
     #   TRANSCRIPTION_QUEUE_MAXLEN: Max queued outputs waiting for timing window
     #   WORD_TIMESTAMPS / BEAM_SIZE / BEST_OF : Whisper inference params
     #   DEFAULT_VAD              : Default Voice Activity Detection toggle
+    #   MAX_BUFFER_DURATION      : Safety limit to prevent memory exhaustion
+    #   MAX_BUFFER_SAMPLES       : Hard limit on buffer size in samples
+    #   
+    #   RECOMMENDED CONFIGURATIONS:
+    #   - Fast response: accumulation_duration=2.0, audio_chunk_size_ms=1000.0
+    #   - Balanced: accumulation_duration=4.0, audio_chunk_size_ms=2000.0  
+    #   - High quality: accumulation_duration=8.0, audio_chunk_size_ms=4000.0
     # ------------------------------------------------------------------
-    MAX_TOTAL_BUFFER_SECONDS = 60
-    OVERLAP_RATIO = 0.25 # 25% overlap by default
     TRANSCRIPTION_QUEUE_MAXLEN = 100
     WORD_TIMESTAMPS = True
     BEAM_SIZE = 1
     BEST_OF = 1
     DEFAULT_VAD = True
+    
+    # Safety limits to prevent unbounded buffer growth
+    MAX_BUFFER_DURATION = 60.0  # Maximum 60 seconds of audio in buffer
+    MAX_BUFFER_SAMPLES = 16000 * 60  # 60 seconds at 16kHz (960k samples)
 
     CATEGORY = "audio_utils"
     RETURN_TYPES = ("STRING",)
     
     def __init__(self):
-        # Audio buffering
-        self.audio_buffer = np.empty(0, dtype=np.int16)
-        self.buffer_duration = 0.0  # Duration in seconds
+        # Smart accumulation buffer for better transcription quality
         self.sample_rate = None
-        self.buffer_samples = None
-        self.max_total_buffer_samples = None  # derived once sample_rate known
+        self.accumulation_buffer = np.empty(0, dtype=np.int16)
+        self.accumulation_duration = 0.0  # Current buffer duration in seconds
+        self.target_accumulation_duration = 8.0  # Target duration for optimal Whisper results
         
         # Whisper model (per-instance lazy load)
         self._whisper_model = None
@@ -94,13 +100,15 @@ class AudioTranscriptionNode:
                     "step": 0.5,
                     "tooltip": "Minimum seconds between transcription outputs"
                 }),
-                "buffer_duration": ("FLOAT", {
-                    "default": 4.0,
-                    "min": 4.0, 
-                    "max": 30.0,
+                "accumulation_duration": ("FLOAT", {
+                    "default": 6.0,
+                    "min": 2.0,
+                    "max": 20.0,
                     "step": 0.5,
-                    "tooltip": "Audio buffer duration in seconds for transcription"
+                    "tooltip": "Audio accumulation duration for optimal Whisper transcription (shorter = faster output, longer = better quality)"
                 }),
+
+
                 "whisper_model": (["tiny", "base", "small", "medium", "large-v2"], {
                     "default": "base",
                     "tooltip": "Whisper model size (larger = more accurate but slower)"
@@ -174,45 +182,41 @@ class AudioTranscriptionNode:
             return True
         return False
     
-    def _buffer_audio(self, audio_input: np.ndarray, sample_rate: int, buffer_duration: float):
+    def _process_audio_chunk(self, audio_input: np.ndarray, sample_rate: int, accumulation_duration: float):
         """
-        Efficiently buffer audio data optimized for Whisper transcription.
-        
-        This is the primary buffering system - no duplicate buffering from LoadAudioTensor.
+        Process a single audio chunk and accumulate it for optimal Whisper transcription.
+        Returns True when we have enough audio for transcription.
         """
-        # Initialize buffer parameters
+        # Initialize sample rate on first call
         if self.sample_rate is None:
             self.sample_rate = sample_rate
-            self.buffer_samples = int(self.sample_rate * buffer_duration)
-            self.max_total_buffer_samples = int(self.sample_rate * self.MAX_TOTAL_BUFFER_SECONDS)
-            logger.info(f"Initialized Whisper-optimized audio buffer: {buffer_duration}s at {sample_rate}Hz = {self.buffer_samples} samples")
+            self.target_accumulation_duration = accumulation_duration
+            logger.info(f"Initialized transcription node with sample rate: {sample_rate}Hz, target accumulation: {accumulation_duration}s")
         
-        # Skip empty frames (from streaming loader)
+        # Skip empty frames
         if audio_input is None or audio_input.size == 0:
             return False
         
-        audio_input = self._normalize_audio_for_whisper(audio_input)
+        # Normalize audio for Whisper
+        normalized_audio = self._normalize_audio_for_whisper(audio_input)
         
-        # Add to buffer - concatenate efficiently
-        if self.audio_buffer.size == 0:
-            self.audio_buffer = audio_input.copy()
+        # Add to accumulation buffer
+        if self.accumulation_buffer.size == 0:
+            self.accumulation_buffer = normalized_audio.copy()
         else:
-            self.audio_buffer = np.concatenate([self.audio_buffer, audio_input])
+            self.accumulation_buffer = np.concatenate([self.accumulation_buffer, normalized_audio])
         
-        # Enforce maximum total buffer size (keep most recent samples)
-        if self.max_total_buffer_samples and len(self.audio_buffer) > self.max_total_buffer_samples:
-            self.audio_buffer = self.audio_buffer[-self.max_total_buffer_samples:]
+        # Update accumulation duration
+        self.accumulation_duration = len(self.accumulation_buffer) / self.sample_rate
         
-        # Update buffer duration
-        self.buffer_duration = len(self.audio_buffer) / self.sample_rate
+        # Safety check: enforce buffer limits to prevent memory exhaustion
+        self._enforce_buffer_limits()
         
         # Check if we have enough audio for transcription
-        if self.buffer_samples is None:
-            return False
-        ready = len(self.audio_buffer) >= self.buffer_samples
+        ready = self.accumulation_duration >= self.target_accumulation_duration
         
         if ready:
-            logger.debug(f"Audio buffer ready for transcription: {self.buffer_duration:.2f}s ({len(self.audio_buffer)} samples)")
+            logger.debug(f"Audio accumulation ready: {self.accumulation_duration:.2f}s >= {self.target_accumulation_duration}s ({len(self.accumulation_buffer)} samples)")
         
         return ready
     
@@ -247,11 +251,34 @@ class AudioTranscriptionNode:
         
         return audio_input
     
+    def _enforce_buffer_limits(self):
+        """
+        Enforce safety limits on the accumulation buffer to prevent memory exhaustion.
+        Trims buffer from the beginning if limits are exceeded.
+        """
+        if self.sample_rate is None or self.accumulation_buffer.size == 0:
+            return
+        
+        # Check duration limit
+        if self.accumulation_duration > self.MAX_BUFFER_DURATION:
+            # Calculate how many samples to keep (keep the most recent audio)
+            samples_to_keep = int(self.MAX_BUFFER_DURATION * self.sample_rate)
+            if samples_to_keep < len(self.accumulation_buffer):
+                # Trim from the beginning, keep the end
+                self.accumulation_buffer = self.accumulation_buffer[-samples_to_keep:]
+                self.accumulation_duration = len(self.accumulation_buffer) / self.sample_rate
+                logger.warning(f"Buffer duration limit exceeded, trimmed to {self.accumulation_duration:.2f}s (kept most recent {self.MAX_BUFFER_DURATION}s)")
+        
+        # Check sample count limit (secondary safety check)
+        if len(self.accumulation_buffer) > self.MAX_BUFFER_SAMPLES:
+            self.accumulation_buffer = self.accumulation_buffer[-self.MAX_BUFFER_SAMPLES:]
+            self.accumulation_duration = len(self.accumulation_buffer) / self.sample_rate
+            logger.warning(f"Buffer sample limit exceeded, trimmed to {len(self.accumulation_buffer)} samples ({self.accumulation_duration:.2f}s)")
 
     
-    def _transcribe_audio_buffer(self, model_size: str, language: str, enable_vad: bool, batch_size: int, output_format: str = "json_segments") -> Optional[str]:
-        """Transcribe the current audio buffer and return combined text."""
-        if self.buffer_samples is None or len(self.audio_buffer) < self.buffer_samples:
+    def _transcribe_accumulated_audio(self, model_size: str, language: str, enable_vad: bool, batch_size: int, output_format: str = "json_segments") -> Optional[str]:
+        """Transcribe the accumulated audio buffer and return combined text."""
+        if self.accumulation_buffer.size == 0:
             return None
         try:
             # Ensure model is loaded; if it was freshly loaded, emit a single warmup sentinel
@@ -269,12 +296,12 @@ class AudioTranscriptionNode:
                 logger.debug("Warmup sentinel emitted once after model load")
                 return result
 
-            # Extract audio chunk for transcription
-            audio_chunk = self.audio_buffer[:self.buffer_samples]
+            # Use the accumulated audio buffer
+            audio_chunk = self.accumulation_buffer
             
-            # Validate audio chunk quality before transcription
-            if len(audio_chunk) != self.buffer_samples:
-                logger.warning(f"Audio chunk size mismatch: expected {self.buffer_samples}, got {len(audio_chunk)}")
+            # Validate audio buffer quality before transcription
+            if len(audio_chunk) == 0:
+                logger.warning("Audio buffer is empty")
                 return None
             
             # Check for audio artifacts (all zeros, extreme values, etc.)
@@ -350,19 +377,14 @@ class AudioTranscriptionNode:
 
 
                 # Metrics
-                if self.sample_rate and self.buffer_samples:
-                    self.total_audio_processed += self.buffer_samples / self.sample_rate
+                if self.sample_rate and self.accumulation_buffer.size > 0:
+                    self.total_audio_processed += len(self.accumulation_buffer) / self.sample_rate
                 self.transcription_count += 1
 
-                # Advance buffer with configurable overlap
-                if self.buffer_samples:
-                    overlap_samples = int(self.buffer_samples * self.OVERLAP_RATIO)
-                    if overlap_samples < 0:
-                        overlap_samples = 0
-                    if overlap_samples >= self.buffer_samples:
-                        overlap_samples = self.buffer_samples - 1
-                    advance_samples = self.buffer_samples - overlap_samples
-                    self.audio_buffer = self.audio_buffer[advance_samples:]
+                # Clear the accumulation buffer after processing (no overlap to prevent duplication)
+                self.accumulation_buffer = np.empty(0, dtype=np.int16)
+                self.accumulation_duration = 0.0
+                logger.debug("Cleared accumulation buffer for next cycle")
 
                 if result:
                     logger.debug(
@@ -390,9 +412,6 @@ class AudioTranscriptionNode:
             raise CriticalTranscriptionError(f"Critical transcription failure: {e}") from e
         except Exception as e:
             logger.warning(f"Non-critical transcription error, skipping chunk: {e}")
-            # Advance half buffer to avoid being stuck
-            if self.buffer_samples:
-                self.audio_buffer = self.audio_buffer[self.buffer_samples // 2:]
             return None
     
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
@@ -427,7 +446,7 @@ class AudioTranscriptionNode:
         except IndexError:
             return None
     
-    def execute(self, audio, transcription_interval=8.0, buffer_duration=8.0, 
+    def execute(self, audio, transcription_interval=8.0, accumulation_duration=8.0,
                 whisper_model="base", language="auto", enable_vad=True, output_format="json_segments"):
         """
         Execute transcription on streaming audio input.
@@ -435,7 +454,7 @@ class AudioTranscriptionNode:
         Args:
             audio: Audio input from LoadAudioTensorStream - tuple of (audio_data, sample_rate)
             transcription_interval: Minimum seconds between outputs (prevents message flooding)
-            buffer_duration: Audio buffer duration for optimal Whisper transcription
+            accumulation_duration: Audio accumulation duration for optimal Whisper results
             whisper_model: Whisper model size (tiny/base/small/medium/large-v2)
             language: Language for transcription (auto for auto-detection)
             enable_vad: Enable voice activity detection to filter silence
@@ -467,12 +486,12 @@ class AudioTranscriptionNode:
                 audio_data = np.array(audio_data, dtype=np.float32)
 
             
-            # Buffer the audio (primary buffering system - no duplicate buffering)
-            ready_for_transcription = self._buffer_audio(audio_data, sample_rate, buffer_duration)
+            # Process the audio chunk and accumulate for optimal transcription
+            ready_for_transcription = self._process_audio_chunk(audio_data, sample_rate, accumulation_duration)
             
-            # Transcribe if buffer has enough audio
+            # Transcribe if we have accumulated enough audio
             if ready_for_transcription:
-                transcription = self._transcribe_audio_buffer(whisper_model, language, enable_vad, 16, output_format)
+                transcription = self._transcribe_accumulated_audio(whisper_model, language, enable_vad, 16, output_format)
                 if transcription and transcription.strip() and len(transcription.strip()) > 5:
                     # Add to queue for controlled output timing (only substantial content or warmup sentinels)
                     self._queue_transcription(transcription)
@@ -517,4 +536,6 @@ class AudioTranscriptionNode:
         if len(self.transcription_queue) == self.transcription_queue.maxlen:
             logger.debug("Transcription queue is full, oldest entry will be replaced.")
         self.transcription_queue.append(transcription)
+    
+
 
