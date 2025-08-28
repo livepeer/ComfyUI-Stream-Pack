@@ -19,6 +19,7 @@ class SRTGeneratorNode:
     
     CATEGORY = "text_utils"
     RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("srt_content",)
     
     def __init__(self):
         self.subtitle_counter = 1
@@ -57,10 +58,6 @@ class SRTGeneratorNode:
                 })
             }
         }
-    
-    @classmethod
-    def RETURN_NAMES(cls):
-        return ("srt_content",)
     
     FUNCTION = "generate_srt"
     
