@@ -4,3 +4,5 @@ diffusers
 numpy
 requests
 opencv-contrib-python>=4.8.0
+faster_whisper
+scipy
