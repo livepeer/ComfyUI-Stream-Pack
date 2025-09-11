@@ -69,11 +69,11 @@ class AudioTranscriptionNode:
     RETURN_TYPES = ("STRING",)
     
     def __init__(self):
-        # Smart accumulation buffer for better transcription quality
+        # Smart accumulation buffer for better transcription quality (optimized for real-time)
         self.sample_rate = None
         self.accumulation_buffer = np.empty(0, dtype=np.int16)
         self.accumulation_duration = 0.0  # Current buffer duration in seconds
-        self.target_accumulation_duration = 8.0  # Target duration for optimal Whisper results
+        self.target_accumulation_duration = 3.0  # Target duration for optimal real-time Whisper results
         
         # Whisper model (per-instance lazy load)
         self._whisper_model = None
@@ -93,22 +93,21 @@ class AudioTranscriptionNode:
         return {
             "required": {
                 "audio": ("WAVEFORM",),  # Input from LoadAudioTensor
+                "sample_rate": ("INT",),  # Sample rate from LoadAudioTensor
                 "transcription_interval": ("FLOAT", {
                     "default": 2.0, 
                     "min": 1.0, 
-                    "max": 30.0,
+                    "max": 10.0,
                     "step": 0.5,
-                    "tooltip": "Minimum seconds between transcription outputs"
+                    "tooltip": "Minimum seconds between transcription outputs (optimized for real-time)"
                 }),
                 "accumulation_duration": ("FLOAT", {
-                    "default": 6.0,
+                    "default": 3.0,
                     "min": 2.0,
-                    "max": 20.0,
+                    "max": 10.0,
                     "step": 0.5,
-                    "tooltip": "Audio accumulation duration for optimal Whisper transcription (shorter = faster output, longer = better quality)"
+                    "tooltip": "Audio accumulation duration for optimal Whisper transcription (reduced for real-time: shorter = faster output, longer = better quality)"
                 }),
-
-
                 "whisper_model": (["tiny", "base", "small", "medium", "large-v2"], {
                     "default": "base",
                     "tooltip": "Whisper model size (larger = more accurate but slower)"
@@ -446,15 +445,16 @@ class AudioTranscriptionNode:
         except IndexError:
             return None
     
-    def execute(self, audio, transcription_interval=8.0, accumulation_duration=8.0,
+    def execute(self, audio, sample_rate, transcription_interval, accumulation_duration,
                 whisper_model="base", language="auto", enable_vad=True, output_format="json_segments"):
         """
         Execute transcription on streaming audio input.
         
         Args:
-            audio: Audio input from LoadAudioTensorStream - tuple of (audio_data, sample_rate)
-            transcription_interval: Minimum seconds between outputs (prevents message flooding)
-            accumulation_duration: Audio accumulation duration for optimal Whisper results
+            audio: Audio input from LoadAudioTensor - numpy array of audio data
+            sample_rate: Sample rate of the audio (from LoadAudioTensor)
+            transcription_interval: Minimum seconds between outputs (prevents message flooding) - optimized for real-time
+            accumulation_duration: Audio accumulation duration for optimal Whisper results - reduced for real-time
             whisper_model: Whisper model size (tiny/base/small/medium/large-v2)
             language: Language for transcription (auto for auto-detection)
             enable_vad: Enable voice activity detection to filter silence
@@ -464,16 +464,16 @@ class AudioTranscriptionNode:
             Tuple containing transcribed text (empty string if not ready to output)
         """
         try:
-            # Parse audio input - expect (audio_data, sample_rate) from LoadAudioTensorStream
-            if isinstance(audio, tuple) and len(audio) == 2:
-                audio_data, sample_rate = audio
-            elif hasattr(audio, 'shape'):
-                # Fallback for direct numpy array (backward compatibility)
-                audio_data = audio
-                sample_rate = 16000  # Default Whisper-optimized rate
-                logger.debug("Using fallback audio format detection")
-            else:
-                logger.warning(f"Unexpected audio format: {type(audio)}, returning empty")
+            # Direct audio processing - sample_rate is now a separate parameter from ComfyUI
+            audio_data = audio
+            
+            # Validate inputs
+            if audio_data is None:
+                logger.warning("Received None audio data, returning empty")
+                return ("",)
+                
+            if not hasattr(audio_data, 'shape') and not isinstance(audio_data, (list, tuple, np.ndarray)):
+                logger.warning(f"Unexpected audio format: {type(audio_data)}, returning empty")
                 return ("",)
             
             # Validate sample rate for Whisper optimization
