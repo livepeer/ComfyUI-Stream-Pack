@@ -445,7 +445,7 @@ class AudioTranscriptionNode:
         except IndexError:
             return None
     
-    def execute(self, audio, sample_rate, transcription_interval=2.0, accumulation_duration=3.0,
+    def execute(self, audio, sample_rate, transcription_interval, accumulation_duration,
                 whisper_model="base", language="auto", enable_vad=True, output_format="json_segments"):
         """
         Execute transcription on streaming audio input.
