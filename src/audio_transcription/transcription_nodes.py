@@ -92,14 +92,8 @@ class AudioTranscriptionNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "audio": ("WAVEFORM",),
-                "sample_rate": ("INT", {
-                    "default": 16000,
-                    "min": 8000,
-                    "max": 192000,
-                    "step": 1000,
-                    "tooltip": "Sample rate in Hz (16000 recommended)"
-                }),
+                "audio": ("WAVEFORM",),  # Input from LoadAudioTensor
+                "sample_rate": ("INT",),  # Sample rate from LoadAudioTensor
                 "transcription_interval": ("FLOAT", {
                     "default": 2.0, 
                     "min": 1.0, 
