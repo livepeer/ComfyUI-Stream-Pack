@@ -62,7 +62,7 @@ class SRTGeneratorNode:
     FUNCTION = "generate_srt"
     
     @classmethod
-    def IS_CHANGED(cls):
+    def IS_CHANGED(cls, **kwargs):
         return float("nan")
     
     def generate_srt(self, 
