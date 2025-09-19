@@ -73,7 +73,7 @@ class AudioTranscriptionNode:
     def __init__(self):
         # Smart accumulation buffer for better transcription quality (optimized for real-time)
         self.sample_rate = None
-        self.accumulation_buffer = np.empty(0, dtype=np.int16)
+        self.accumulation_buffer = np.empty(0, dtype=np.float32)
         self.accumulation_duration = 0.0  # Current buffer duration in seconds
         self.target_accumulation_duration = 3.0  # Target duration for optimal real-time Whisper results
         
@@ -382,7 +382,7 @@ class AudioTranscriptionNode:
                 self.transcription_count += 1
 
                 # Clear the accumulation buffer after processing (no overlap to prevent duplication)
-                self.accumulation_buffer = np.empty(0, dtype=np.int16)
+                self.accumulation_buffer = np.empty(0, dtype=np.float32)
                 self.accumulation_duration = 0.0
                 logger.debug("Cleared accumulation buffer for next cycle")
 
@@ -444,7 +444,7 @@ class AudioTranscriptionNode:
             return resampled_audio.astype(np.float32)
             
         except Exception as e:
-            logger.warning(f"Resampling failed, using original audio: {e}")
+            logger.error(f"Resampling failed, using original audio: {e}")
             return audio_data
 
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
