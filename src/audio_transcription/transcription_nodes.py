@@ -432,20 +432,14 @@ class AudioTranscriptionNode:
         
         if audio_data.size == 0:
             return audio_data
+        # Use scipy.signal.resample for high-quality resampling
+        num_samples = int(len(audio_data) * target_sample_rate / original_sample_rate)
+        resampled_audio = signal.resample(audio_data, num_samples)
         
-        try:
-            # Use scipy.signal.resample for high-quality resampling
-            num_samples = int(len(audio_data) * target_sample_rate / original_sample_rate)
-            resampled_audio = signal.resample(audio_data, num_samples)
-            
-            logger.debug(f"Resampled audio from {original_sample_rate}Hz to {target_sample_rate}Hz "
-                        f"({len(audio_data)} -> {len(resampled_audio)} samples)")
-            
-            return resampled_audio.astype(np.float32)
-            
-        except Exception as e:
-            logger.error(f"Resampling failed, using original audio: {e}")
-            return audio_data
+        logger.debug(f"Resampled audio from {original_sample_rate}Hz to {target_sample_rate}Hz "
+                    f"({len(audio_data)} -> {len(resampled_audio)} samples)")
+        
+        return resampled_audio.astype(np.float32)
 
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
         """Write WAV file manually if scipy is not available."""
@@ -533,7 +527,12 @@ class AudioTranscriptionNode:
                 return ("",)
             
             # Resample to 16kHz for optimal Whisper performance
-            audio_data = self._resample_to_16khz(audio_data, sample_rate)
+            try:
+                audio_data = self._resample_to_16khz(audio_data, sample_rate)
+            except Exception as e:
+                logger.error(f"Audio resampling to 16Khz failed, returning empty: {e}")
+                return ("",)
+            
             sample_rate = 16000  # Update sample rate after resampling
             
             # Ensure audio_data is a numpy array with proper dtype
