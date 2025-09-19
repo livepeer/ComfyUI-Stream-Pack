@@ -12,12 +12,14 @@ import time
 import tempfile
 import os
 import numpy as np
+import torch
 from typing import Optional, List, Deque, Dict, Any
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue, Empty
 from faster_whisper import WhisperModel
+from scipy import signal
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ class AudioTranscriptionNode:
     def __init__(self):
         # Smart accumulation buffer for better transcription quality (optimized for real-time)
         self.sample_rate = None
-        self.accumulation_buffer = np.empty(0, dtype=np.int16)
+        self.accumulation_buffer = np.empty(0, dtype=np.float32)
         self.accumulation_duration = 0.0  # Current buffer duration in seconds
         self.target_accumulation_duration = 3.0  # Target duration for optimal real-time Whisper results
         
@@ -92,14 +94,7 @@ class AudioTranscriptionNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "audio": ("WAVEFORM",),
-                "sample_rate": ("INT", {
-                    "default": 16000,
-                    "min": 8000,
-                    "max": 192000,
-                    "step": 1000,
-                    "tooltip": "Sample rate in Hz (16000 recommended)"
-                }),
+                "audio": ("AUDIO",),
                 "transcription_interval": ("FLOAT", {
                     "default": 2.0, 
                     "min": 1.0, 
@@ -138,7 +133,7 @@ class AudioTranscriptionNode:
     FUNCTION = "execute"
 
     @classmethod
-    def IS_CHANGED(cls):
+    def IS_CHANGED(cls, **kwargs):
         return float("nan")
     
 
@@ -387,7 +382,7 @@ class AudioTranscriptionNode:
                 self.transcription_count += 1
 
                 # Clear the accumulation buffer after processing (no overlap to prevent duplication)
-                self.accumulation_buffer = np.empty(0, dtype=np.int16)
+                self.accumulation_buffer = np.empty(0, dtype=np.float32)
                 self.accumulation_duration = 0.0
                 logger.debug("Cleared accumulation buffer for next cycle")
 
@@ -419,6 +414,33 @@ class AudioTranscriptionNode:
             logger.warning(f"Non-critical transcription error, skipping chunk: {e}")
             return None
     
+    def _resample_to_16khz(self, audio_data: np.ndarray, original_sample_rate: int) -> np.ndarray:
+        """
+        Resample audio to 16kHz for optimal Whisper performance.
+        
+        Args:
+            audio_data: Input audio data as numpy array
+            original_sample_rate: Original sample rate of the audio
+            
+        Returns:
+            Resampled audio data at 16kHz
+        """
+        target_sample_rate = 16000
+        
+        if original_sample_rate == target_sample_rate:
+            return audio_data
+        
+        if audio_data.size == 0:
+            return audio_data
+        # Use scipy.signal.resample for high-quality resampling
+        num_samples = int(len(audio_data) * target_sample_rate / original_sample_rate)
+        resampled_audio = signal.resample(audio_data, num_samples)
+        
+        logger.debug(f"Resampled audio from {original_sample_rate}Hz to {target_sample_rate}Hz "
+                    f"({len(audio_data)} -> {len(resampled_audio)} samples)")
+        
+        return resampled_audio.astype(np.float32)
+
     def _write_wav_file(self, filename: str, audio_data: np.ndarray, sample_rate: int):
         """Write WAV file manually if scipy is not available."""
         import struct
@@ -451,14 +473,13 @@ class AudioTranscriptionNode:
         except IndexError:
             return None
     
-    def execute(self, audio, sample_rate, transcription_interval, accumulation_duration,
+    def execute(self, audio, transcription_interval, accumulation_duration,
                 whisper_model="base", language="auto", enable_vad=True, output_format="json_segments"):
         """
         Execute transcription on streaming audio input.
         
         Args:
-            audio: Audio input from LoadAudioTensor - numpy array of audio data
-            sample_rate: Sample rate of the audio (from LoadAudioTensor)
+            audio: Audio input from LoadAudioTensor - AUDIO dictionary with waveform and sample_rate
             transcription_interval: Minimum seconds between outputs (prevents message flooding) - optimized for real-time
             accumulation_duration: Audio accumulation duration for optimal Whisper results - reduced for real-time
             whisper_model: Whisper model size (tiny/base/small/medium/large-v2)
@@ -470,23 +491,51 @@ class AudioTranscriptionNode:
             Tuple containing transcribed text (empty string if not ready to output)
         """
         try:
-            # Direct audio processing - sample_rate is now a separate parameter from ComfyUI
-            audio_data = audio
+            # Extract audio data and sample rate from AUDIO dictionary
+            if not isinstance(audio, dict) or 'waveform' not in audio or 'sample_rate' not in audio:
+                logger.warning(f"Invalid audio format: expected AUDIO dict with waveform and sample_rate, got {type(audio)}")
+                return ("",)
+            
+            waveform = audio['waveform']
+            sample_rate = audio['sample_rate']
+            
+            # Convert torch tensor to numpy if needed
+            if isinstance(waveform, torch.Tensor):
+                audio_data = waveform.detach().cpu().numpy()
+            else:
+                audio_data = waveform
+            
+            # Handle tensor dimensions (batch, channels, samples) -> samples
+            if audio_data.ndim == 3:
+                # (batch, channels, samples) -> take first batch, average channels
+                audio_data = audio_data[0]  # Remove batch dimension
+                if audio_data.shape[0] > 1:  # Multiple channels
+                    audio_data = audio_data.mean(axis=0)  # Average channels to mono
+                else:
+                    audio_data = audio_data[0]  # Single channel
+            elif audio_data.ndim == 2:
+                # (channels, samples) -> average channels to mono if needed
+                if audio_data.shape[0] > 1:
+                    audio_data = audio_data.mean(axis=0)
+                else:
+                    audio_data = audio_data[0]
+            # If already 1D, use as-is
             
             # Validate inputs
-            if audio_data is None:
-                logger.warning("Received None audio data, returning empty")
-                return ("",)
-                
-            if not hasattr(audio_data, 'shape') and not isinstance(audio_data, (list, tuple, np.ndarray)):
-                logger.warning(f"Unexpected audio format: {type(audio_data)}, returning empty")
+            if audio_data is None or audio_data.size == 0:
+                logger.warning("Received empty audio data, returning empty")
                 return ("",)
             
-            # Validate sample rate for Whisper optimization
-            if sample_rate != 16000:
-                logger.warning(f"Non-optimal sample rate {sample_rate}Hz for Whisper (16kHz recommended)")
+            # Resample to 16kHz for optimal Whisper performance
+            try:
+                audio_data = self._resample_to_16khz(audio_data, sample_rate)
+            except Exception as e:
+                logger.error(f"Audio resampling to 16Khz failed, returning empty: {e}")
+                return ("",)
             
-            # Ensure audio_data is a numpy array before buffering
+            sample_rate = 16000  # Update sample rate after resampling
+            
+            # Ensure audio_data is a numpy array with proper dtype
             if not isinstance(audio_data, np.ndarray):
                 logger.debug(f"Converting audio_data from {type(audio_data)} to numpy array.")
                 audio_data = np.array(audio_data, dtype=np.float32)
@@ -534,7 +583,7 @@ class AudioTranscriptionNode:
             logger.error(f"Critical error in transcription node: {e}")
             raise
         except Exception as e:
-            logger.error(f"Recoverable execute error: {e}")
+            logger.warning(f"Recoverable execute error: {e}")
             return ("",)
     
     def _queue_transcription(self, transcription: str):
