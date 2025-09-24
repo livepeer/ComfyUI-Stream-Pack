@@ -3,13 +3,15 @@ name = "stream-pack"
 description = "A suite of custom ComfyUI nodes for building real-time video and audio workflows using ComfyStream."
 version = "1.0.0"
 license = {file = "LICENSE"}
-dependencies = ["mediapipe", "torch", "diffusers"]
+dynamic = ["dependencies"]
 
 [project.urls]
 Repository = "https://github.com/livepeer/ComfyUI-Stream-Pack"
-#  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "livepeer-comfystream"
 DisplayName = "ComfyUI-Stream-Pack"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/livepeer/comfystream-docs/main/logo/icon-light-120px.svg"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
