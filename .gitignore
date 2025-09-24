@@ -2,6 +2,11 @@
 __pycache__
 *.pyc
 
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
 # IDEs
 .vscode
 *.code-workspace
