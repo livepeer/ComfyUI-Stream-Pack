@@ -12,4 +12,7 @@ Repository = "https://github.com/livepeer/ComfyUI-Stream-Pack"
 [tool.comfy]
 PublisherId = "livepeer-comfystream"
 DisplayName = "ComfyUI-Stream-Pack"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/livepeer/comfystream-docs/main/logo/icon-light-120px.svg"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
