@@ -10,6 +10,6 @@ Repository = "https://github.com/livepeer/ComfyUI-Stream-Pack"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "livepeer-comfystream"
 DisplayName = "ComfyUI-Stream-Pack"
 Icon = ""
