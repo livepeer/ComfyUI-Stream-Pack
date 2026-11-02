@@ -15,7 +15,7 @@ legacy = ["mediapipe", "torch", "diffusers", "numpy", "requests", "opencv-contri
 media = ["torch==2.8.0", "torchvision==0.23.0", "diffusers==0.39.0", "transformers>=4.57,<5", "accelerate", "safetensors", "pillow", "imageio[ffmpeg]", "soundfile"]
 language = ["torch==2.8.0", "torchaudio==2.8.0", "transformers>=4.57,<5", "accelerate", "qwen-tts==0.1.1", "soundfile"]
 chat = ["torch==2.8.0", "transformers>=5.2,<6", "accelerate", "pillow", "bitsandbytes>=0.48"]
-test = ["pytest>=8", "build", "ruff"]
+test = ["pytest>=8", "build", "ruff", "numpy<2.3"]
 
 [tool.setuptools.packages.find]
 where = ["."]

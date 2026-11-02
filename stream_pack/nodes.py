@@ -94,8 +94,13 @@ def capability_node(capability):
 
 
 from .catalog import load_catalog
+from .native import AudioArtifact, AudioSeconds
+
+NODE_CLASS_MAPPINGS.update(
+    StreamPackAudioSeconds=AudioSeconds, StreamPackAudioArtifact=AudioArtifact
+)
 
 for _capability in load_catalog().values():
-    NODE_CLASS_MAPPINGS[_capability.document["workflow"]["1"]["class_type"]] = (
-        capability_node(_capability)
-    )
+    _class_name = _capability.document["workflow"]["1"]["class_type"]
+    if _class_name.startswith("StreamPack"):
+        NODE_CLASS_MAPPINGS[_class_name] = capability_node(_capability)

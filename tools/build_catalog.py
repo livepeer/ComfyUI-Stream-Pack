@@ -1,7 +1,12 @@
 """Regenerate bundled descriptors from reviewed model pins and public parameters."""
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from stream_pack.native import ace_workflow
+from stream_pack.protocols import wire_schema
 
 ROOT = Path(__file__).resolve().parents[1] / "stream_pack" / "capabilities"
 MODELS = [
@@ -215,6 +220,23 @@ def main():
                 "2": {"class_type": "StreamPackOutput", "inputs": {"value": ["1", 0]}},
             },
         }
+        document["wire_schema"] = wire_schema(operation, document["input_schema"])
+        if name == "ace-music":
+            document["workflow"] = ace_workflow()
+            document["bindings"] = {
+                "prompt": {"node": "3", "input": "tags"},
+                "lyrics": {"node": "3", "input": "lyrics"},
+                "seconds": {"node": "2", "input": "seconds"},
+            }
+            document["output_binding"] = {"node": "10", "key": "service_result"}
+            document["components"] = [
+                {
+                    "source": "Comfy-Org/ace_step_1.5_ComfyUI_files",
+                    "revision": "371bb1680f8c88d8c1083f6ffb6330d3d55bff76",
+                    "file": "checkpoints/ace_step_1.5_turbo_aio.safetensors",
+                    "license": "apache-2.0",
+                }
+            ]
         (ROOT / (name + ".json")).write_text(
             json.dumps(document, indent=2) + "\n", encoding="utf-8"
         )

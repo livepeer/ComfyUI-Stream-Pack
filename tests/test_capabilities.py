@@ -15,7 +15,12 @@ def test_catalog_matches_installed_nodes_and_pins():
     catalog = load_catalog()
     assert len(catalog) == 9
     for capability in catalog.values():
-        capability.validate_workflow(NODE_CLASS_MAPPINGS)
+        capability.validate_workflow()
+        if capability.id != "ace-music":
+            capability.validate_workflow(NODE_CLASS_MAPPINGS)
+        else:
+            with pytest.raises(ValueError, match="Required node is not installed"):
+                capability.validate_workflow(NODE_CLASS_MAPPINGS)
         assert capability.document["admission"] == "candidate"
         assert len(capability.digest) == 64
 

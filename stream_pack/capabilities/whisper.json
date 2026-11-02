@@ -96,5 +96,30 @@
         ]
       }
     }
+  },
+  "wire_schema": {
+    "type": "object",
+    "properties": {
+      "language": {
+        "type": "string",
+        "default": ""
+      },
+      "file": {
+        "type": "string",
+        "minLength": 1
+      },
+      "response_format": {
+        "type": "string",
+        "enum": [
+          "json",
+          "text"
+        ],
+        "default": "json"
+      }
+    },
+    "required": [
+      "file"
+    ],
+    "additionalProperties": false
   }
 }

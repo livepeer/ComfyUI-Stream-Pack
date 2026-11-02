@@ -117,5 +117,52 @@
         ]
       }
     }
+  },
+  "wire_schema": {
+    "type": "object",
+    "properties": {
+      "input": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "reference_audio": {
+        "type": "string",
+        "minLength": 1
+      },
+      "reference_text": {
+        "type": "string",
+        "minLength": 1
+      },
+      "language": {
+        "type": "string",
+        "default": "Auto"
+      },
+      "voice": {
+        "type": "string",
+        "minLength": 1
+      },
+      "response_format": {
+        "type": "string",
+        "const": "wav"
+      }
+    },
+    "required": [
+      "input"
+    ],
+    "additionalProperties": false,
+    "anyOf": [
+      {
+        "required": [
+          "voice"
+        ]
+      },
+      {
+        "required": [
+          "reference_audio",
+          "reference_text"
+        ]
+      }
+    ]
   }
 }

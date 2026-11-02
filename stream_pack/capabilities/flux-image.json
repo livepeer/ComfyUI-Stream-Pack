@@ -121,5 +121,44 @@
         ]
       }
     }
+  },
+  "wire_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "default": 0
+      },
+      "size": {
+        "type": "string",
+        "enum": [
+          "256x256",
+          "512x512",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "default": "1024x1024"
+      },
+      "n": {
+        "type": "integer",
+        "const": 1
+      },
+      "response_format": {
+        "type": "string",
+        "const": "b64_json"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
   }
 }

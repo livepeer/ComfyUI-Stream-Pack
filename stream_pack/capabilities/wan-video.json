@@ -120,5 +120,41 @@
         ]
       }
     }
+  },
+  "wire_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "default": 0
+      },
+      "input_reference": {
+        "type": "string",
+        "minLength": 1
+      },
+      "seconds": {
+        "type": "string",
+        "enum": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+        ],
+        "default": "4"
+      }
+    },
+    "required": [
+      "prompt",
+      "input_reference"
+    ],
+    "additionalProperties": false
   }
 }
