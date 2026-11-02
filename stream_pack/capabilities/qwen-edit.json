@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "id": "qwen-edit",
+  "description": "Edit an image using instructions",
+  "model": {
+    "source": "Qwen/Qwen-Image-Edit-2511",
+    "revision": "6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9",
+    "license": "apache-2.0"
+  },
+  "operation": "images_edits",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "media",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "default": 0
+      },
+      "image": {
+        "type": "string",
+        "minLength": 1
+      },
+      "width": {
+        "type": "integer",
+        "minimum": 256,
+        "maximum": 1536,
+        "default": 1024
+      },
+      "height": {
+        "type": "integer",
+        "minimum": 256,
+        "maximum": 1536,
+        "default": 1024
+      }
+    },
+    "required": [
+      "prompt",
+      "image"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "prompt": {
+      "node": "1",
+      "input": "prompt"
+    },
+    "seed": {
+      "node": "1",
+      "input": "seed"
+    },
+    "image": {
+      "node": "1",
+      "input": "image"
+    },
+    "width": {
+      "node": "1",
+      "input": "width"
+    },
+    "height": {
+      "node": "1",
+      "input": "height"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackQwenEdit",
+      "inputs": {
+        "prompt": "",
+        "seed": 0,
+        "image": "",
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  }
+}

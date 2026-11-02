@@ -39,6 +39,8 @@ def load_nodes() -> tuple[dict[str, type], dict[str, str]]:
 
 # Dynamically collect mappings from submodules.
 NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS = load_nodes()
+from stream_pack.nodes import NODE_CLASS_MAPPINGS as SERVICE_NODES
+NODE_CLASS_MAPPINGS.update(SERVICE_NODES)
 NODE_DISPLAY_NAME_MAPPINGS["StreamPack"] = "Stream Pack Nodes"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

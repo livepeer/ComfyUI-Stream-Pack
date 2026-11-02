@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "id": "qwen-speech",
+  "description": "Synthesize speech from a reference voice",
+  "model": {
+    "source": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+    "license": "apache-2.0"
+  },
+  "operation": "audio_speech",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "language",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "input": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "reference_audio": {
+        "type": "string",
+        "minLength": 1
+      },
+      "reference_text": {
+        "type": "string",
+        "minLength": 1
+      },
+      "language": {
+        "type": "string",
+        "default": "Auto"
+      }
+    },
+    "required": [
+      "input",
+      "reference_audio",
+      "reference_text"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "input": {
+      "node": "1",
+      "input": "input"
+    },
+    "reference_audio": {
+      "node": "1",
+      "input": "reference_audio"
+    },
+    "reference_text": {
+      "node": "1",
+      "input": "reference_text"
+    },
+    "language": {
+      "node": "1",
+      "input": "language"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackQwenSpeech",
+      "inputs": {
+        "input": "",
+        "reference_audio": "",
+        "reference_text": "",
+        "language": "Auto"
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  }
+}

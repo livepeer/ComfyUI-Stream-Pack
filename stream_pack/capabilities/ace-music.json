@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "id": "ace-music",
+  "description": "Generate music from a description and lyrics",
+  "model": {
+    "source": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22",
+    "license": "mit"
+  },
+  "operation": "music_generations",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "media",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "lyrics": {
+        "type": "string",
+        "default": ""
+      },
+      "seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120,
+        "default": 30
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "prompt": {
+      "node": "1",
+      "input": "prompt"
+    },
+    "lyrics": {
+      "node": "1",
+      "input": "lyrics"
+    },
+    "seconds": {
+      "node": "1",
+      "input": "seconds"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackAceMusic",
+      "inputs": {
+        "prompt": "",
+        "lyrics": "",
+        "seconds": 30
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  }
+}

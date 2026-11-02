@@ -2,8 +2,27 @@
 name = "stream-pack"
 description = "A suite of custom ComfyUI nodes for building real-time video and audio workflows using ComfyStream."
 version = "1.0.0"
-license = {file = "LICENSE"}
-dynamic = ["dependencies"]
+license = {file = "stream_pack/LICENSE"}
+requires-python = ">=3.12"
+dependencies = ["jsonschema>=4.23,<5"]
+
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+legacy = ["mediapipe", "torch", "diffusers", "numpy", "requests", "opencv-contrib-python>=4.8.0", "faster_whisper", "scipy", "librosa", "pillow"]
+media = ["torch==2.8.0", "torchvision==0.23.0", "diffusers==0.39.0", "transformers>=4.57,<5", "accelerate", "safetensors", "pillow", "imageio[ffmpeg]", "soundfile"]
+language = ["torch==2.8.0", "torchaudio==2.8.0", "transformers>=4.57,<5", "accelerate", "qwen-tts==0.1.1", "soundfile"]
+chat = ["torch==2.8.0", "transformers>=5.2,<6", "accelerate", "pillow", "bitsandbytes>=0.48"]
+test = ["pytest>=8", "build", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stream_pack*"]
+
+[tool.setuptools.package-data]
+stream_pack = ["capabilities/*.json", "LICENSE", "README.md"]
 
 [project.urls]
 Repository = "https://github.com/livepeer/ComfyUI-Stream-Pack"
@@ -14,5 +33,3 @@ PublisherId = "livepeer-comfystream"
 DisplayName = "ComfyUI-Stream-Pack"
 Icon = "https://raw.githubusercontent.com/livepeer/comfystream-docs/main/logo/icon-light-120px.svg"
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}

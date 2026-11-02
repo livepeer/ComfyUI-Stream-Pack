@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "id": "whisper",
+  "description": "Transcribe recorded speech",
+  "model": {
+    "source": "openai/whisper-large-v3-turbo",
+    "revision": "41f01f3fe87f28c78e2fbf8b568835947dd65ed9",
+    "license": "mit"
+  },
+  "operation": "audio_transcriptions",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "language",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "audio": {
+        "type": "string",
+        "minLength": 1
+      },
+      "language": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "audio"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "audio": {
+      "node": "1",
+      "input": "audio"
+    },
+    "language": {
+      "node": "1",
+      "input": "language"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackWhisper",
+      "inputs": {
+        "audio": "",
+        "language": ""
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  }
+}

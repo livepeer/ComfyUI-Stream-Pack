@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "id": "flux-image",
+  "description": "Generate or edit an image",
+  "model": {
+    "source": "black-forest-labs/FLUX.2-klein-4B",
+    "revision": "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+    "license": "apache-2.0"
+  },
+  "operation": "images_generations",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "media",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "default": 0
+      },
+      "width": {
+        "type": "integer",
+        "minimum": 256,
+        "maximum": 1536,
+        "default": 1024
+      },
+      "height": {
+        "type": "integer",
+        "minimum": 256,
+        "maximum": 1536,
+        "default": 1024
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "prompt": {
+      "node": "1",
+      "input": "prompt"
+    },
+    "seed": {
+      "node": "1",
+      "input": "seed"
+    },
+    "width": {
+      "node": "1",
+      "input": "width"
+    },
+    "height": {
+      "node": "1",
+      "input": "height"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackFluxImage",
+      "inputs": {
+        "prompt": "",
+        "seed": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  }
+}

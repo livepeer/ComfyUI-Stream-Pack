@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "id": "qwen-chat",
+  "description": "Chat and image understanding",
+  "model": {
+    "source": "Qwen/Qwen3.8-27B",
+    "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+    "license": "apache-2.0"
+  },
+  "operation": "chat_completions",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "chat",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "messages": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object"
+        }
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8192,
+        "default": 1024
+      }
+    },
+    "required": [
+      "messages"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "messages": {
+      "node": "1",
+      "input": "messages"
+    },
+    "max_tokens": {
+      "node": "1",
+      "input": "max_tokens"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackQwenChat",
+      "inputs": {
+        "messages": "[]",
+        "max_tokens": 1024
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  }
+}
