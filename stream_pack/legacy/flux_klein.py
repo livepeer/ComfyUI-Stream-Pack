@@ -226,6 +226,13 @@ class FluxKleinModel:
         next session's first frame refines the previous client's last output instead
         of doing a fresh full inference."""
         self._prev = None
+        self._prompt = DEFAULT_PROMPT
+        self._cached_prompt_str = None
+        self._cached_prompt_embeds = None
+        self._cached_text_ids = None
+        self._pinned = None
+        self._noise_key = None
+        self._noise = None
 
     def update_prompt(self, prompt: str) -> None:
         self._prompt = prompt  # prompt-embed cache invalidates itself on change
