@@ -92,7 +92,7 @@
   },
   "workflow": {
     "1": {
-      "class_type": "CheckpointLoaderSimple",
+      "class_type": "StreamPackResidentCheckpoint",
       "inputs": {
         "ckpt_name": "ace_step_1.5_turbo_aio.safetensors"
       }

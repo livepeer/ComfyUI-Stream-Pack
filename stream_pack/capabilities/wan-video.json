@@ -156,5 +156,13 @@
       "input_reference"
     ],
     "additionalProperties": false
-  }
+  },
+  "components": [
+    {
+      "source": "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+      "revision": "596658fd9ca6b7b71d5057529bbf319ecbc61d74",
+      "license": "apache-2.0",
+      "role": "execution"
+    }
+  ]
 }

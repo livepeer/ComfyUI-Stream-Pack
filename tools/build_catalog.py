@@ -221,6 +221,25 @@ def main():
             },
         }
         document["wire_schema"] = wire_schema(operation, document["input_schema"])
+        if name == "triposr":
+            document["components"] = [
+                {
+                    "source": "facebook/dino-vitb16",
+                    "revision": "f205d5d8e640a89a2b8ef0369670dfc37cc07fc2",
+                    "file": "config.json",
+                    "license": "apache-2.0",
+                    "role": "image_tokenizer",
+                }
+            ]
+        if name == "wan-video":
+            document["components"] = [
+                {
+                    "source": "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+                    "revision": "596658fd9ca6b7b71d5057529bbf319ecbc61d74",
+                    "license": "apache-2.0",
+                    "role": "execution",
+                }
+            ]
         if name == "ace-music":
             document["workflow"] = ace_workflow()
             document["bindings"] = {

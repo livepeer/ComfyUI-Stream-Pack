@@ -22,15 +22,17 @@ class Capability:
         d = self.document
         if d["version"] != 1 or not re.fullmatch(r"[a-z][a-z0-9_-]*", d["id"]):
             raise ValueError("Invalid capability version or identifier")
-        if not re.fullmatch(r"[0-9a-f]{40}", d["model"]["revision"]):
-            raise ValueError("Model revision must be an immutable commit")
-        if d["model"]["license"] not in {
+        licenses = {
             "apache-2.0",
             "mit",
             "bsd-3-clause",
             "bsd-2-clause",
-        }:
-            raise ValueError("Model license is not in the permissive catalog")
+        }
+        for component in [d["model"], *d.get("components", [])]:
+            if not re.fullmatch(r"[0-9a-f]{40}", component["revision"]):
+                raise ValueError("Model revision must be an immutable commit")
+            if component["license"] not in licenses:
+                raise ValueError("Model license is not in the permissive catalog")
         Draft202012Validator.check_schema(d["input_schema"])
         Draft202012Validator.check_schema(d["output_schema"])
         self.validate_workflow()

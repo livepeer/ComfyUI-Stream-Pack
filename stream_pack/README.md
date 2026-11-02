@@ -9,12 +9,18 @@ Run `python tools/build_catalog.py` after deliberately updating a reviewed model
 The generated JSON files are package resources, not checkout-relative assets.
 `Capability.validate_workflow(NODE_CLASS_MAPPINGS)` checks installed node mappings.
 
-The adapters in `models.py` are candidate reference integrations, not evidence that
-all nine models fit a GPU or have passed inference tests. Wan's original checkpoint
-layout requires verification against the selected diffusers release. TripoSR requires
-the separately installed `tsr` reference implementation; ACE-Step requires its reference
-package and checkpoint directory. These optional dependencies are not silently fetched
-by nodes. All model loading is offline and requires a populated immutable HF cache.
+All model loading is offline and uses immutable local snapshot paths, including
+nested tokenizer/configuration loads. Wan's official Diffusers layout is a declared,
+pinned execution component. The media extra installs a pinned TripoSR reference
+package; its DINO configuration is another declared component. ACE-Step uses native
+core nodes and an explicitly retained checkpoint wrapper, with its own pinned file.
+Nodes never fetch these optional artifacts during inference.
+
+Six model integrations have produced representative outputs in candidate GPU tests
+on eliteprd1. These checks used mounted working sources and do not certify all nine
+models or the final immutable deployment. Chat/vision, image editing and Wan still
+require model acceptance. The media/speech and chat profiles are separate: a full
+uv resolution fails because they require incompatible Transformers major versions.
 
 ComfyStream injects legacy queues through `legacy_io`. New process integrations can
 bind session-scoped queues explicitly; never share a customer's feedback or audio
@@ -22,8 +28,9 @@ buffer with another session. `SessionBuffers` owns bounded shared-memory blocks 
 must be closed by the allocating process, including after worker failure.
 
 Legacy model behavior, including FLUX feedback and pitch shifting, now lives under
-`stream_pack.legacy`. ComfyStream retains imports for old workflow class names. Its
-existing live runner has not yet been switched to the new IPC channel mechanism.
+`stream_pack.legacy`. FFmpeg-branch frame/container transformations live under
+`stream_pack.video_tools`. ComfyStream retains old module paths and node class names
+through aliases. Its candidate live client now uses the shared-memory IPC channels.
 
 Model licenses are recorded per immutable checkpoint. Preserve the repository license
 and upstream notices; optional model code and dependencies require their own license

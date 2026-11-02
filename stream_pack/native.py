@@ -1,5 +1,30 @@
 """Service boundaries around native ComfyUI workflow nodes."""
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _checkpoint(name):
+    from comfy.nodes_context import get_nodes
+
+    loader = get_nodes().NODE_CLASS_MAPPINGS["CheckpointLoaderSimple"]()
+    return getattr(loader, loader.FUNCTION)(ckpt_name=name)
+
+
+class ResidentCheckpoint:
+    """Retain immutable model weights while the core clears request caches."""
+
+    CATEGORY = "StreamPack/Service"
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    FUNCTION = "load"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"ckpt_name": ("STRING",)}}
+
+    def load(self, ckpt_name):
+        return _checkpoint(ckpt_name)
+
 
 class AudioSeconds:
     CATEGORY = "StreamPack/Service"
@@ -43,7 +68,7 @@ class AudioArtifact:
 def ace_workflow():
     return {
         "1": {
-            "class_type": "CheckpointLoaderSimple",
+            "class_type": "StreamPackResidentCheckpoint",
             "inputs": {"ckpt_name": "ace_step_1.5_turbo_aio.safetensors"},
         },
         "2": {"class_type": "StreamPackAudioSeconds", "inputs": {"seconds": 30}},

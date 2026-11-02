@@ -100,5 +100,14 @@
       "image"
     ],
     "additionalProperties": false
-  }
+  },
+  "components": [
+    {
+      "source": "facebook/dino-vitb16",
+      "revision": "f205d5d8e640a89a2b8ef0369670dfc37cc07fc2",
+      "file": "config.json",
+      "license": "apache-2.0",
+      "role": "image_tokenizer"
+    }
+  ]
 }

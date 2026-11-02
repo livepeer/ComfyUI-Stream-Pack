@@ -37,9 +37,23 @@ def load_model(capability: str):
     """One resident model per execution worker; worker exit releases CUDA memory."""
     import torch
 
-    model = load_catalog()[capability].document["model"]
+    descriptor = load_catalog()[capability].document
+    model = next(
+        (
+            part
+            for part in descriptor.get("components", [])
+            if part.get("role") == "execution"
+        ),
+        descriptor["model"],
+    )
     source, revision = model["source"], model["revision"]
-    options = {"revision": revision, "local_files_only": True}
+    from huggingface_hub import snapshot_download
+
+    # Reference implementations may forget to forward revision to subfolder
+    # loaders. A pinned local snapshot keeps every nested lookup offline and
+    # bound to the same checkpoint, without relying on a mutable refs/main.
+    source = snapshot_download(source, revision=revision, local_files_only=True)
+    options = {"local_files_only": True}
     if capability in {"flux-image", "qwen-edit", "wan-video"}:
         from diffusers import (
             Flux2KleinPipeline,
@@ -52,9 +66,6 @@ def load_model(capability: str):
             "qwen-edit": QwenImageEditPlusPipeline,
             "wan-video": WanImageToVideoPipeline,
         }[capability]
-        if capability == "wan-video":
-            source = "Wan-AI/Wan2.2-I2V-A14B-Diffusers"
-            options["revision"] = "596658fd9ca6b7b71d5057529bbf319ecbc61d74"
         pipeline = cls.from_pretrained(source, torch_dtype=torch.bfloat16, **options)
         if capability in {"qwen-edit", "wan-video"}:
             pipeline.enable_model_cpu_offload()
@@ -86,7 +97,6 @@ def load_model(capability: str):
         return pipeline(
             "automatic-speech-recognition",
             model=source,
-            revision=revision,
             device="cuda",
             torch_dtype=torch.float16,
             model_kwargs={"local_files_only": True},
@@ -109,25 +119,24 @@ def load_model(capability: str):
             .eval()
         )
     if capability == "triposr":
-        from huggingface_hub import snapshot_download
         from tsr.system import TSR
 
-        directory = snapshot_download(source, revision=revision, local_files_only=True)
-        return TSR.from_pretrained(
-            directory, config_name="config.yaml", weight_name="model.ckpt"
-        ).to("cuda")
-    if capability == "ace-music":
-        from acestep.handler import AceStepHandler
-
-        handler = AceStepHandler()
-        # Reference code and full checkpoint layout must be installed in the music image.
-        directory = Path(os.environ["STREAM_PACK_ACE_CHECKPOINT_DIR"]).resolve()
-        result = handler.initialize_service(
-            project_root=str(directory), config_path="acestep-v15-turbo", device="cuda"
+        tokenizer = next(
+            part
+            for part in descriptor["components"]
+            if part["role"] == "image_tokenizer"
         )
-        if isinstance(result, tuple) and result[-1] is False:
-            raise RuntimeError("Music backend initialization failed")
-        return handler
+        directory = snapshot_download(
+            tokenizer["source"], revision=tokenizer["revision"], local_files_only=True
+        )
+        model = TSR.from_pretrained(
+            source,
+            config_name="config.yaml",
+            weight_name="model.ckpt",
+            image_tokenizer_path=directory,
+        ).to("cuda")
+        model.renderer.set_chunk_size(8192)
+        return model
     raise ValueError("Unknown local capability")
 
 
@@ -234,31 +243,8 @@ def execute(capability: str, inputs: dict) -> dict:
         if capability == "triposr":
             image = Image.open(input_path(inputs["image"])).convert("RGB")
             codes = model([image], device="cuda")
-            mesh = model.extract_mesh(codes)[0]
+            mesh = model.extract_mesh(codes, has_vertex_color=True)[0]
             path = output_path(".obj")
             mesh.export(str(path))
             return artifact(path, "model/obj")
-        if capability == "ace-music":
-            from acestep.inference import (
-                GenerationConfig,
-                GenerationParams,
-                generate_music,
-            )
-
-            params = GenerationParams(
-                caption=inputs["prompt"],
-                lyrics=inputs.get("lyrics", ""),
-                duration=inputs.get("seconds", 30),
-            )
-            path = output_path(".wav")
-            result = generate_music(
-                dit_handler=model,
-                llm_handler=None,
-                params=params,
-                config=GenerationConfig(batch_size=1),
-                save_dir=str(path.parent),
-            )
-            if not result.success or not result.audios:
-                raise RuntimeError("Music generation failed")
-            return artifact(Path(result.audios[0]["path"]), "audio/wav")
     raise ValueError("Unknown local capability")
