@@ -35,6 +35,10 @@ class LoadTensor:
         try:
             frame = tensor_cache.image_inputs.get(block=True, timeout=timeout_seconds)
             frame.side_data.skipped = False
+            import torch
+
+            if not isinstance(frame.side_data.input, torch.Tensor):
+                frame.side_data.input = torch.from_numpy(frame.side_data.input)
             return (frame.side_data.input,)
         except queue.Empty:
             raise ComfyStreamInputTimeoutError("video", timeout_seconds)
