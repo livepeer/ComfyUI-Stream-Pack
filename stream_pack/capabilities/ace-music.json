@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "id": "ace-music",
+  "description": "Generate music from a description and lyrics",
+  "model": {
+    "source": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22",
+    "license": "mit"
+  },
+  "operation": "music_generations",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "media",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "lyrics": {
+        "type": "string",
+        "default": ""
+      },
+      "seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120,
+        "default": 30
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "prompt": {
+      "node": "3",
+      "input": "tags"
+    },
+    "lyrics": {
+      "node": "3",
+      "input": "lyrics"
+    },
+    "seconds": {
+      "node": "2",
+      "input": "seconds"
+    }
+  },
+  "output_binding": {
+    "node": "10",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackResidentCheckpoint",
+      "inputs": {
+        "ckpt_name": "ace_step_1.5_turbo_aio.safetensors"
+      }
+    },
+    "2": {
+      "class_type": "StreamPackAudioSeconds",
+      "inputs": {
+        "seconds": 30
+      }
+    },
+    "3": {
+      "class_type": "TextEncodeAceStepAudio1.5",
+      "inputs": {
+        "clip": [
+          "1",
+          1
+        ],
+        "tags": "",
+        "lyrics": "",
+        "seed": 0,
+        "bpm": 120,
+        "duration": [
+          "2",
+          0
+        ],
+        "timesignature": "4",
+        "language": "en",
+        "keyscale": "C major",
+        "generate_audio_codes": false,
+        "cfg_scale": 2.0,
+        "temperature": 0.85,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0.0
+      }
+    },
+    "4": {
+      "class_type": "ModelSamplingAuraFlow",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "shift": 3.0
+      }
+    },
+    "5": {
+      "class_type": "EmptyAceStep1.5LatentAudio",
+      "inputs": {
+        "seconds": [
+          "2",
+          0
+        ],
+        "batch_size": 1
+      }
+    },
+    "6": {
+      "class_type": "ConditioningZeroOut",
+      "inputs": {
+        "conditioning": [
+          "3",
+          0
+        ]
+      }
+    },
+    "7": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "4",
+          0
+        ],
+        "positive": [
+          "3",
+          0
+        ],
+        "negative": [
+          "6",
+          0
+        ],
+        "latent_image": [
+          "5",
+          0
+        ],
+        "seed": 0,
+        "steps": 8,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0
+      }
+    },
+    "8": {
+      "class_type": "VAEDecodeAudio",
+      "inputs": {
+        "samples": [
+          "7",
+          0
+        ],
+        "vae": [
+          "1",
+          2
+        ]
+      }
+    },
+    "9": {
+      "class_type": "StreamPackAudioArtifact",
+      "inputs": {
+        "audio": [
+          "8",
+          0
+        ]
+      }
+    },
+    "10": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "9",
+          0
+        ]
+      }
+    }
+  },
+  "wire_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "lyrics": {
+        "type": "string",
+        "default": ""
+      },
+      "seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120,
+        "default": 30
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "additionalProperties": false
+  },
+  "components": [
+    {
+      "source": "Comfy-Org/ace_step_1.5_ComfyUI_files",
+      "revision": "371bb1680f8c88d8c1083f6ffb6330d3d55bff76",
+      "file": "checkpoints/ace_step_1.5_turbo_aio.safetensors",
+      "license": "apache-2.0"
+    }
+  ]
+}

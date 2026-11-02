@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "id": "triposr",
+  "description": "Reconstruct a mesh from an object image",
+  "model": {
+    "source": "stabilityai/TripoSR",
+    "revision": "5b521936b01fbe1890f6f9baed0254ab6351c04a",
+    "license": "mit"
+  },
+  "operation": "meshes_generations",
+  "modes": [
+    "job",
+    "sync"
+  ],
+  "admission": "candidate",
+  "dependency_group": "media",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "image": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "artifacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "media_type"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "usage": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifacts"
+    ],
+    "additionalProperties": false
+  },
+  "bindings": {
+    "image": {
+      "node": "1",
+      "input": "image"
+    }
+  },
+  "output_binding": {
+    "node": "2",
+    "key": "service_result"
+  },
+  "workflow": {
+    "1": {
+      "class_type": "StreamPackTriposr",
+      "inputs": {
+        "image": ""
+      }
+    },
+    "2": {
+      "class_type": "StreamPackOutput",
+      "inputs": {
+        "value": [
+          "1",
+          0
+        ]
+      }
+    }
+  },
+  "wire_schema": {
+    "type": "object",
+    "properties": {
+      "image": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "additionalProperties": false
+  },
+  "components": [
+    {
+      "source": "facebook/dino-vitb16",
+      "revision": "f205d5d8e640a89a2b8ef0369670dfc37cc07fc2",
+      "file": "config.json",
+      "license": "apache-2.0",
+      "role": "image_tokenizer"
+    }
+  ]
+}

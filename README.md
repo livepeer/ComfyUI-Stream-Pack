@@ -1,5 +1,9 @@
 # ComfyUI Node Pack
 
+The candidate [local capability platform](stream_pack/README.md) adds immutable model
+descriptors, explicit workflow bindings, agent tools, lazy model adapters and migrated
+stream nodes. GPU acceptance is required before production admission.
+
 A suite of custom **ComfyUI nodes** for building **real-time video and audio workflows** using [ComfyStream](https://github.com/yondonfu/comfystream). This pack introduces nodes that enable **live streaming, AI-enhanced processing, and real-time interaction** with ComfyUI workflows.
 
 ## Node Categories
